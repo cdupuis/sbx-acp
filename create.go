@@ -120,9 +120,7 @@ func runCreate(args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "sbx-acp: %v\n", err)
 		return exitUsage
 	}
-	say := func(format string, a ...any) {
-		fmt.Fprintf(stderr, "sbx-acp: agent %q: %s\n", plan.Agent, fmt.Sprintf(format, a...))
-	}
+	say := agentReporter(stderr, plan.Agent).say
 	sbxPath, err := locateSbx(*sbxName)
 	if err != nil {
 		say("%v", err)
@@ -163,9 +161,7 @@ func runCreate(args []string, stderr io.Writer) int {
 		return 0
 	}
 
-	sandboxSay := func(format string, a ...any) {
-		fmt.Fprintf(stderr, "sbx-acp: sandbox %q: %s\n", plan.Name, fmt.Sprintf(format, a...))
-	}
+	sandboxSay := sandboxReporter(stderr, plan.Name).say
 	say("creating sandbox %q", plan.Name)
 	code, err := createSandbox(in, sbxPath, plan.argv(), stderr)
 	switch {

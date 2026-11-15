@@ -66,6 +66,23 @@ func printUsage(fs *flag.FlagSet, stderr io.Writer) {
 	fs.PrintDefaults()
 }
 
+type reporter struct {
+	w       io.Writer
+	subject string
+}
+
+func sandboxReporter(w io.Writer, name string) reporter {
+	return reporter{w, fmt.Sprintf("sandbox %q", name)}
+}
+
+func agentReporter(w io.Writer, agent string) reporter {
+	return reporter{w, fmt.Sprintf("agent %q", agent)}
+}
+
+func (r reporter) say(format string, a ...any) {
+	fmt.Fprintf(r.w, "sbx-acp: %s: %s\n", r.subject, fmt.Sprintf(format, a...))
+}
+
 func shellLine(argv []string) string {
 	parts := make([]string, len(argv))
 	for i, a := range argv {
