@@ -1,0 +1,4 @@
+schemaVersion: "3"
+kind: workload
+bogusField: true
+provides: ["broken@1.0.0"]

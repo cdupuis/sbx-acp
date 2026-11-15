@@ -1,0 +1,10 @@
+schemaVersion: "3"
+kind: mixin
+provides: []
+capabilities:
+    - type: com.docker.sandbox/acp@1
+      optional: true
+      config:
+        agent: echo
+        command: [cat]
+        env: {}
