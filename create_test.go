@@ -10,7 +10,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 const echoKit = "docker.io/example/echo-acp:1"
@@ -28,15 +27,6 @@ func createdName(t *testing.T, r result) string {
 		t.Fatalf("first sbx call = %q, want create --no-progress --name NAME ...\nstderr: %s", r.calls, r.stderr)
 	}
 	return r.calls[0][3]
-}
-
-func wantStderr(t *testing.T, r result, frags ...string) {
-	t.Helper()
-	for _, frag := range frags {
-		if !strings.Contains(r.stderr, frag) {
-			t.Errorf("stderr %q does not contain %q", r.stderr, frag)
-		}
-	}
 }
 
 // realTempDir is a temporary directory under the path the kernel reports for
@@ -186,33 +176,6 @@ func TestCreateRemovesASandboxThatNeverStartedAnAgent(t *testing.T) {
 			wantArgv(t, r.calls[2], "rm", "--force", createdName(t, r))
 		})
 	}
-}
-
-// startAndSignal starts sbx-acp, waits until the fake sbx has logged calls
-// calls, and sends SIGTERM. Stdin stays open so the agent cannot finish first.
-func startAndSignal(t *testing.T, s setup, calls int, args ...string) result {
-	t.Helper()
-	ss := newSession(t, s, args...)
-	stdin, err := ss.cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stdin.Close()
-	// Buffers would make Wait block on pipes the orphaned agent still holds, and
-	// closing stdin to release them lets the agent exit 0 before the signal lands.
-	ss.cmd.Stdout, ss.cmd.Stderr = nil, nil
-	if err := ss.cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	for deadline := time.Now().Add(10 * time.Second); len(ss.calls(t)) < calls; time.Sleep(10 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("sbx-acp never reached sbx call %d: %q", calls, ss.calls(t))
-		}
-	}
-	if err := ss.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	return ss.wait(t)
 }
 
 func TestCreateSignalMidStreamStillRemovesWithRm(t *testing.T) {
