@@ -152,7 +152,7 @@ func watchInterrupts() *interrupts {
 				in.cancel()
 			}
 			if in.child != nil && in.child.Signal(s) != nil {
-				in.child.Kill()
+				_ = in.child.Kill()
 			}
 			in.mu.Unlock()
 		}

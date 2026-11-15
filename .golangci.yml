@@ -1,0 +1,9 @@
+version: "2"
+linters:
+  exclusions:
+    presets:
+      # Unchecked errors from Close, fmt.Fprint to stderr, and os.Remove are deliberate here.
+      - std-error-handling
+formatters:
+  enable:
+    - gofmt

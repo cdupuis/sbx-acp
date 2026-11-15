@@ -30,24 +30,24 @@ func (h *fakeHub) start(t *testing.T) (catalog, *httptest.Server) {
 		h.requests = append(h.requests, r.URL.RequestURI())
 		h.mu.Unlock()
 		q := r.URL.Query()
-		repo, isManifest := strings.CutPrefix(r.URL.Path, "/v2/sbx/")
-		repo, isManifest = strings.CutSuffix(repo, "/manifests/latest")
+		rest, inNamespace := strings.CutPrefix(r.URL.Path, "/v2/sbx/")
+		repo, isManifest := strings.CutSuffix(rest, "/manifests/latest")
 		switch {
 		case r.URL.Path == "/v2/namespaces/sbx/repositories" && q.Get("name") == "acp" && q.Get("page_size") == "100":
 			if h.listCode != 0 {
 				w.WriteHeader(h.listCode)
 			}
-			w.Write([]byte(h.list))
+			_, _ = w.Write([]byte(h.list))
 		case r.URL.Path == "/token" && q.Get("service") == "registry.docker.io" && strings.HasPrefix(q.Get("scope"), "repository:sbx/"):
-			w.Write([]byte(`{"token":"tok-` + q.Get("scope") + `"}`))
-		case isManifest && r.Header.Get("Authorization") == "Bearer tok-repository:sbx/"+repo+":pull" &&
+			_, _ = w.Write([]byte(`{"token":"tok-` + q.Get("scope") + `"}`))
+		case inNamespace && isManifest && r.Header.Get("Authorization") == "Bearer tok-repository:sbx/"+repo+":pull" &&
 			strings.Contains(r.Header.Get("Accept"), "application/vnd.oci.image.index.v1+json"):
 			body, ok := h.manifests[repo]
 			if !ok {
 				http.Error(w, "boom", http.StatusInternalServerError)
 				return
 			}
-			w.Write([]byte(body))
+			_, _ = w.Write([]byte(body))
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
 		}

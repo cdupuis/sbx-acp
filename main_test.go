@@ -169,7 +169,7 @@ func fakeExec(args []string) int {
 	}
 	if os.Getenv("FAKE_SBX_FAULT") == "die-by-kill" {
 		self, _ := os.FindProcess(os.Getpid())
-		self.Signal(syscall.SIGKILL)
+		_ = self.Signal(syscall.SIGKILL)
 		time.Sleep(10 * time.Second)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
