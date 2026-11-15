@@ -39,8 +39,19 @@ func wantStderr(t *testing.T, r result, frags ...string) {
 	}
 }
 
+// realTempDir is a temporary directory under the path the kernel reports for
+// it. On macOS the default one is reached through the /var symlink.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestCreateStreamsTheAgentInANewSandbox(t *testing.T) {
-	wd := t.TempDir()
+	wd := realTempDir(t)
 	r := invoke(t, setup{createKits: []string{"echo"}, stdin: []byte("ping"), dir: wd}, createWith("--kit", echoKit, "echo")...)
 	wantCode(t, r, 0)
 	wantStdout(t, r, []byte("ping"))
@@ -99,7 +110,11 @@ func TestCreatePassesPathsVerbatim(t *testing.T) {
 }
 
 func TestCreateUsageErrors(t *testing.T) {
-	home := t.TempDir()
+	home := realTempDir(t)
+	homeLink := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(home, homeLink); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name   string
 		setup  setup
@@ -109,6 +124,8 @@ func TestCreateUsageErrors(t *testing.T) {
 		{"working directory is the filesystem root", setup{dir: "/"}, createWith("--kit", echoKit, "echo"),
 			`sbx-acp: agent "echo": refusing to mount "/" as the workspace; start sbx-acp in the project directory or pass a PATH`},
 		{"working directory is home", setup{dir: home, env: []string{"HOME=" + home}}, createWith("--kit", echoKit, "echo"),
+			`sbx-acp: agent "echo": refusing to mount "` + home + `" as the workspace`},
+		{"working directory is home through a symlink", setup{dir: home, env: []string{"HOME=" + homeLink}}, createWith("--kit", echoKit, "echo"),
 			`sbx-acp: agent "echo": refusing to mount "` + home + `" as the workspace`},
 		{"kit reference as the agent", setup{}, createWith("--kit", echoKit, "sbx/claude:latest"),
 			`sbx-acp: agent "sbx/claude:latest": is not an agent name; use a built-in agent such as claude, codex, or opencode`},
