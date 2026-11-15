@@ -21,10 +21,10 @@ const usageText = `usage: sbx-acp attach [--agent NAME] [--sbx PATH] [--check] S
 `
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stderr, dockerHub()))
 }
 
-func run(args []string, stderr io.Writer) int {
+func run(args []string, stderr io.Writer, hub catalog) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usageText)
 		return exitUsage
@@ -33,7 +33,7 @@ func run(args []string, stderr io.Writer) int {
 	case "attach":
 		return runAttach(args[1:], stderr)
 	case "create":
-		return runCreate(args[1:], stderr)
+		return runCreate(args[1:], stderr, hub)
 	case "-h", "--help", "help":
 		fmt.Fprint(stderr, usageText)
 		return 0

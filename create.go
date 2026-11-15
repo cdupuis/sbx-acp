@@ -95,7 +95,7 @@ func sandboxName(agent string, rnd io.Reader) (string, error) {
 	return "acp-" + agent + "-" + hex.EncodeToString(b[:]), nil
 }
 
-func runCreate(args []string, stderr io.Writer) int {
+func runCreate(args []string, stderr io.Writer, hub catalog) int {
 	fs := flag.NewFlagSet("sbx-acp create", flag.ContinueOnError)
 	var kits []string
 	fs.Func("kit", "ACP mixin reference for sbx create --kit, repeatable; skips the Docker Hub lookup", func(s string) error {
@@ -132,7 +132,7 @@ func runCreate(args []string, stderr io.Writer) int {
 	source, hint := "mixins from --kit", ""
 	if len(plan.Kits) == 0 {
 		ctx, cancel := context.WithTimeout(in.ctx, lookupTimeout)
-		published, err := dockerHub.Published(ctx, mixinNamespace, plan.Agent)
+		published, err := hub.Published(ctx, mixinNamespace, plan.Agent)
 		cancel()
 		if code := in.received(); code != 0 {
 			return code

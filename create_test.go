@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -201,20 +200,10 @@ func TestCreateSignalDuringCreateIsForwardedAndRemovesNothing(t *testing.T) {
 	}
 }
 
-// useHub points the create command at h for the rest of the test.
-func useHub(t *testing.T, h *fakeHub) *httptest.Server {
-	t.Helper()
-	c, srv := h.start(t)
-	saved := dockerHub
-	dockerHub = c
-	t.Cleanup(func() { dockerHub = saved })
-	return srv
-}
-
 func TestCreateCheckUsesTheLookup(t *testing.T) {
-	useHub(t, &fakeHub{list: listing(t), manifests: realManifests(t)})
+	hub, _ := (&fakeHub{list: listing(t), manifests: realManifests(t)}).start(t)
 	var stderr bytes.Buffer
-	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr)
+	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr, hub)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, stderr.String())
 	}
@@ -229,10 +218,10 @@ func TestCreateCheckUsesTheLookup(t *testing.T) {
 }
 
 func TestCreateExitsFourWhenTheCatalogIsDown(t *testing.T) {
-	srv := useHub(t, &fakeHub{})
+	hub, srv := (&fakeHub{}).start(t)
 	srv.Close()
 	var stderr bytes.Buffer
-	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr)
+	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr, hub)
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4\nstderr: %s", code, stderr.String())
 	}
@@ -243,8 +232,7 @@ func TestCreateExitsFourWhenTheCatalogIsDown(t *testing.T) {
 }
 
 func TestCreateWithoutAMixinSuggestsKitWhenNoAgentStarts(t *testing.T) {
-	h := &fakeHub{list: listing(t), manifests: realManifests(t)}
-	useHub(t, h)
+	hub, _ := (&fakeHub{list: listing(t), manifests: realManifests(t)}).start(t)
 	tmp := t.TempDir()
 	root, template, log := filepath.Join(tmp, "sandboxes"), filepath.Join(tmp, "template"), filepath.Join(tmp, "calls.jsonl")
 	stageFixtures(t, template, []string{"claude"})
@@ -253,7 +241,7 @@ func TestCreateWithoutAMixinSuggestsKitWhenNoAgentStarts(t *testing.T) {
 	t.Setenv("FAKE_SBX_LOG", log)
 	t.Setenv("FAKE_SBX_FAULT", "")
 	var stderr bytes.Buffer
-	code := run([]string{"create", "--sbx", fakeSbx, "opencode", tmp}, &stderr)
+	code := run([]string{"create", "--sbx", fakeSbx, "opencode", tmp}, &stderr, hub)
 	if code != 3 {
 		t.Fatalf("exit code = %d, want 3\nstderr: %s", code, stderr.String())
 	}
