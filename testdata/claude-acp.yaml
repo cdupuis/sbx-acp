@@ -1,0 +1,78 @@
+# Sandbox kit for the Claude Code ACP adapter mixin
+# (image/claude-acp/debian-13/claude-acp.yaml). The DHI definition is the
+# content; the dhi/build frontend publishes only what it places (the adapter,
+# its Node runtime, the wrapper, the SBOMs) and fills author and source from
+# what the build knows.
+#
+# Mirrors examples/claude-acp/claude-acp.yaml in
+# github.com/docker/sandbox-kit-spec: keep the capabilities block identical
+# so both kits behave the same. Everything environmental (the Anthropic
+# credential, egress, settings) rides with the claude kit this one requires,
+# because the adapter drives that kit's claude rather than talking to
+# Anthropic itself.
+schemaVersion: "3"
+displayName: Claude Code ACP adapter
+description: >-
+    The Agent Client Protocol adapter for Claude Code as a mixin — the claude-agent-acp stdio server with its Node runtime in an overlay, bound to the composed claude binary. Layer it onto a base that composes the claude-mixin kit and point an ACP client (such as Zed) at `claude-agent-acp`.
+licenses: [Apache-2.0]
+kind: mixin
+# The version is the definition's VERSION var: the claude-agent-acp release
+# the overlay carries, validated here and expanded into the provide.
+args:
+    version:
+        required: true
+        pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+        description: claude-agent-acp release the overlay carries
+        buildArg: VERSION
+version: 0.101.0
+provides: ["claude-acp@0.101.0"]
+# The adapter execs the sandboxed claude binary, so a composition without
+# claude yields an adapter with no agent behind it. Requiring the
+# capability rather than naming the kit keeps any claude-carrying kit
+# eligible: the wrapper finds that kit's claude wherever it installed it
+# (/usr/local/bin for claude-mixin, $HOME/.local/bin for the workload).
+requires: ["claude"]
+# No network policy and no credential: the adapter opens no sockets of
+# its own. Its egress and auth are whatever the claude it execs already
+# has, which the claude-mixin kit declares. The package is installed at
+# build time, so unlike an `npx`-at-startup launcher this needs no
+# registry.npmjs.org access at runtime either.
+# The adapter reads permissions.defaultMode from the user settings that
+# claude-mixin seeds, preserving the interactive permission posture.
+capabilities:
+    - type: com.docker.sandbox/acp@1
+      optional: true
+      description: Drive claude sessions over the Agent Client Protocol
+      config:
+        agent: claude
+        command: [claude-agent-acp]
+    # Offer both versions during the runtime rollout; select one.
+    - type: com.docker.sandbox/agent-context@1
+      optional: true
+      config: &agent-context
+        content: |
+            ## Claude Code ACP adapter
+
+            `claude-agent-acp` is installed at `/usr/local/bin/claude-agent-acp`. It
+            is an Agent Client Protocol (ACP) server on stdio: a client spawns it and
+            drives a Claude Code session through the protocol. It is not an
+            interactive command — with no client on the other end of stdio it sits
+            silent, so do not run it from this shell to "check" it.
+
+            Host tools must attach it to a non-TTY stdin/stdout stream, for example
+            `sbx exec -i <sandbox> claude-agent-acp`. In Zed, configure an agent
+            server whose command runs that.
+
+            The adapter drives the same `claude` binary this sandbox already has
+            (the one `command -v claude` finds, unless `CLAUDE_CODE_EXECUTABLE`
+            names another), so authentication is
+            the surface `claude` uses: the proxy-mediated Anthropic credential in
+            `~/.claude/.credentials.json` and `~/.claude/settings.json`. If `claude`
+            works here, the adapter works with no extra setup and nothing separate to
+            log in to. Sessions created through ACP share the session-state volumes
+            with interactive `claude` runs.
+    - type: com.docker.sandbox/agent-context@2
+      optional: true
+      config: *agent-context
+author: Docker, Inc. https://docker.com
+sourceUrl: https://github.com/docker-hardened-images/definitions

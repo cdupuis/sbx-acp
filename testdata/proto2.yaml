@@ -1,0 +1,10 @@
+schemaVersion: "3"
+kind: workload
+provides: ["proto2@1.0.0"]
+capabilities:
+    - type: com.docker.sandbox/acp@1
+      optional: true
+      config:
+        agent: proto2
+        command: [cat]
+        protocolVersion: 2

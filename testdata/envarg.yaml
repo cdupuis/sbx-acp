@@ -1,0 +1,10 @@
+schemaVersion: "3"
+kind: workload
+provides: ["envarg@1.0.0"]
+capabilities:
+    - type: com.docker.sandbox/acp@1
+      optional: true
+      config:
+        agent: envarg
+        command: [cat]
+        env: {HOME_COPY: "${{ kit.env.HOME }}"}

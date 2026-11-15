@@ -1,0 +1,9 @@
+schemaVersion: "3"
+kind: workload
+provides: ["echo@1.0.0"]
+capabilities:
+    - type: com.docker.sandbox/acp@1
+      optional: true
+      config:
+        agent: echo
+        command: [cat]

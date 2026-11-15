@@ -1,0 +1,10 @@
+schemaVersion: "3"
+kind: workload
+provides: ["envagent@1.0.0"]
+capabilities:
+    - type: com.docker.sandbox/acp@1
+      optional: true
+      config:
+        agent: envagent
+        command: [sh, -c, 'printf "%s|%s" "$GREETING" "$EMPTY"']
+        env: {GREETING: hello, EMPTY: ""}
