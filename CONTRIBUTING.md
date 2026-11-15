@@ -17,11 +17,13 @@ go test ./... -count=1
 
 ## Rules a change must keep
 
-- Use public surfaces only. Those are the documented `sbx` CLI, the Kit spec, and the Go module `github.com/docker/sandbox-kit-spec/v3`. Do not import internal Go packages, and do not open the sandboxd socket.
+- Use public surfaces only. Those are the documented `sbx` CLI, the Kit spec, the Go module `github.com/docker/sandbox-kit-spec/v3`, the documented Docker Hub API, and the registry API of the OCI distribution spec. Do not import internal Go packages, and do not open the sandboxd socket.
 - Write nothing to stdout except the agent's bytes. Errors, warnings, `--check`, and `--help` go to stderr.
 - Keep `resolve.go` the only file that imports the spec module.
 - Refuse when the tool cannot know the launch. Print one sentence that says why. Do not substitute a default.
-- Test what a user or an ACP client can observe: stdout bytes, stderr text, exit codes, and the arguments that `sbx` received.
+- Look up kits when the tool runs. Do not add a list of kit names, tags, or digests to the code.
+- Remove a sandbox only after this process created it.
+- Test what a user or an ACP client can observe: stdout bytes, stderr text, exit codes, the arguments that `sbx` received, and the requests that Docker Hub received. Tests must not use the network.
 
 ## Send a change
 
@@ -32,7 +34,7 @@ go test ./... -count=1
 
 ## Report a bug
 
-Open an issue with the command you ran, the `sbx-acp:` line from stderr, the output of `sbx-acp --check SANDBOX`, and your `sbx` version.
+Open an issue with the command you ran, the `sbx-acp:` line from stderr, the output of the same command with `--check`, and your `sbx` version.
 
 Report a vulnerability the way [SECURITY.md](SECURITY.md) describes, not in a public issue.
 
