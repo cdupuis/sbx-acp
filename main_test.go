@@ -59,20 +59,86 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// runFakeSbx implements only `sbx exec [-i] [-e K=V]... SANDBOX CMD...`. It runs
-// CMD on the host, runs the shipped discovery script against FAKE_SBX_ROOT, and
-// appends every argv it receives to FAKE_SBX_LOG as one JSON array per line.
+// runFakeSbx implements `sbx exec [-i] [-e K=V]... SANDBOX CMD...`,
+// `sbx create ... --name NAME ...`, and `sbx rm --force NAME`. Each sandbox is a
+// directory under FAKE_SBX_ROOT holding its staged kits, and create copies
+// FAKE_SBX_TEMPLATE there. Every argv is appended to FAKE_SBX_LOG as one JSON
+// array per line.
 func runFakeSbx(args []string) int {
 	if f, err := os.OpenFile(os.Getenv("FAKE_SBX_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
 		line, _ := json.Marshal(args)
 		fmt.Fprintf(f, "%s\n", line)
 		f.Close()
 	}
-	if len(args) == 0 || args[0] != "exec" {
-		fmt.Fprintln(os.Stderr, "fake sbx: only exec is implemented")
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "fake sbx: no command")
 		return 2
 	}
-	args = args[1:]
+	switch args[0] {
+	case "exec":
+		return fakeExec(args[1:])
+	case "create":
+		return fakeCreate(args[1:])
+	case "rm":
+		return fakeRm(args[1:])
+	}
+	fmt.Fprintf(os.Stderr, "fake sbx: %q is not implemented\n", args[0])
+	return 2
+}
+
+func fakeSandboxDir(name string) (string, bool) {
+	dir := filepath.Join(os.Getenv("FAKE_SBX_ROOT"), name)
+	_, err := os.Stat(dir)
+	return dir, err == nil
+}
+
+func fakeCreate(args []string) int {
+	name := ""
+	for i, a := range args {
+		if a == "--name" && i+1 < len(args) {
+			name = args[i+1]
+		}
+	}
+	switch os.Getenv("FAKE_SBX_FAULT") {
+	case "create-fails":
+		fmt.Fprintln(os.Stderr, "error: the daemon refused the create")
+		return 1
+	case "create-sleeps":
+		time.Sleep(10 * time.Second)
+	}
+	dir, exists := fakeSandboxDir(name)
+	if name == "" || exists {
+		fmt.Fprintf(os.Stderr, "error: sandbox '%s' already exists\n", name)
+		return 1
+	}
+	if err := os.CopyFS(dir, os.DirFS(os.Getenv("FAKE_SBX_TEMPLATE"))); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("\n  ✓ Created sandbox %s\n", name)
+	return 0
+}
+
+func fakeRm(args []string) int {
+	if len(args) != 2 || args[0] != "--force" {
+		fmt.Fprintf(os.Stderr, "fake sbx: usage: sbx rm --force NAME, got %q\n", args)
+		return 2
+	}
+	dir, exists := fakeSandboxDir(args[1])
+	switch {
+	case os.Getenv("FAKE_SBX_FAULT") == "rm-fails":
+		fmt.Fprintln(os.Stderr, "error: the daemon refused the removal")
+		return 1
+	case !exists:
+		fmt.Fprintf(os.Stderr, "error: sandbox '%s' not found\n", args[1])
+		return 1
+	}
+	os.RemoveAll(dir)
+	fmt.Printf("Removed sandbox %s\n", args[1])
+	return 0
+}
+
+func fakeExec(args []string) int {
 	interactive := false
 	var overlay []string
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
@@ -93,12 +159,13 @@ func runFakeSbx(args []string) int {
 		return 2
 	}
 	sandbox, argv := args[0], args[1:]
-	if sandbox != os.Getenv("FAKE_SBX_SANDBOX") {
+	root, exists := fakeSandboxDir(sandbox)
+	if !exists {
 		fmt.Fprintf(os.Stderr, "sandbox %q not found\n", sandbox)
 		return 125
 	}
 	if len(argv) == 3 && argv[0] == "sh" && argv[1] == "-c" && strings.Contains(argv[2], kitRoot) {
-		return fakeDiscovery(argv[2])
+		return fakeDiscovery(argv[2], root)
 	}
 	if os.Getenv("FAKE_SBX_FAULT") == "die-by-kill" {
 		self, _ := os.FindProcess(os.Getpid())
@@ -114,8 +181,7 @@ func runFakeSbx(args []string) int {
 	return exitCode(cmd.Run())
 }
 
-func fakeDiscovery(script string) int {
-	root := os.Getenv("FAKE_SBX_ROOT")
+func fakeDiscovery(script, root string) int {
 	if os.Getenv("FAKE_SBX_FAULT") == "no-sh" {
 		fmt.Fprintln(os.Stderr, "exec: sh: not found")
 		return 127
@@ -142,10 +208,13 @@ type result struct {
 }
 
 type setup struct {
-	kits  []string
-	fault string
-	stdin []byte
-	path  bool
+	kits       []string
+	createKits []string
+	fault      string
+	stdin      []byte
+	path       bool
+	dir        string
+	env        []string
 }
 
 type session struct {
@@ -154,41 +223,51 @@ type session struct {
 	logPath        string
 }
 
-// newSession prepares the built sbx-acp with a kit root made from the fixtures in
-// s.kits. Unless s.path is set, callers pass --sbx with the fake.
+// newSession prepares the built sbx-acp with an existing sandbox "box" staging
+// the fixtures in s.kits, and makes every sandbox it creates stage s.createKits.
+// Unless s.path is set, callers pass --sbx with the fake.
 func newSession(t *testing.T, s setup, args ...string) *session {
 	t.Helper()
 	tmp := t.TempDir()
-	root := filepath.Join(tmp, "kits")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range s.kits {
-		b, err := os.ReadFile(filepath.Join("testdata", name+".yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, name, "kit.yaml"), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	root, template := filepath.Join(tmp, "sandboxes"), filepath.Join(tmp, "template")
+	stageFixtures(t, filepath.Join(root, "box"), s.kits)
+	stageFixtures(t, template, s.createKits)
 	ss := &session{logPath: filepath.Join(tmp, "calls.jsonl")}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
 	ss.cmd = exec.CommandContext(ctx, binPath, args...)
+	ss.cmd.Dir = s.dir
 	ss.cmd.Env = append(os.Environ(),
-		"FAKE_SBX_LOG="+ss.logPath, "FAKE_SBX_ROOT="+root, "FAKE_SBX_SANDBOX=box", "FAKE_SBX_FAULT="+s.fault)
+		"FAKE_SBX_LOG="+ss.logPath, "FAKE_SBX_ROOT="+root, "FAKE_SBX_TEMPLATE="+template, "FAKE_SBX_FAULT="+s.fault)
 	if s.path {
 		ss.cmd.Env = append(ss.cmd.Env, "PATH="+filepath.Dir(fakeSbx)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
+	ss.cmd.Env = append(ss.cmd.Env, s.env...)
 	if s.stdin != nil {
 		ss.cmd.Stdin = bytes.NewReader(s.stdin)
 	}
 	ss.cmd.Stdout, ss.cmd.Stderr = &ss.stdout, &ss.stderr
 	return ss
+}
+
+// stageFixtures makes dir a kit root holding testdata/NAME.yaml as NAME/kit.yaml.
+func stageFixtures(t *testing.T, dir string, names []string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		b, err := os.ReadFile(filepath.Join("testdata", name+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name, "kit.yaml"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func (ss *session) calls(t *testing.T) [][]string {
@@ -232,7 +311,7 @@ func invoke(t *testing.T, s setup, args ...string) result {
 }
 
 func withFake(flags ...string) []string {
-	return append(append([]string{"--sbx", fakeSbx}, flags...), "box")
+	return append(append([]string{"attach", "--sbx", fakeSbx}, flags...), "box")
 }
 
 func wantCode(t *testing.T, r result, code int) {
@@ -305,7 +384,7 @@ func TestAgentFlagSelectsOneOfTwo(t *testing.T) {
 }
 
 func TestDefaultSbxIsFoundOnPath(t *testing.T) {
-	r := invoke(t, setup{kits: []string{"echo"}, stdin: []byte("ping"), path: true}, "box")
+	r := invoke(t, setup{kits: []string{"echo"}, stdin: []byte("ping"), path: true}, "attach", "box")
 	wantCode(t, r, 0)
 	wantStdout(t, r, []byte("ping"))
 }
@@ -334,11 +413,25 @@ func TestCheckReportsOnStderrAndStartsNothing(t *testing.T) {
 }
 
 func TestHelpWritesNothingToStdout(t *testing.T) {
-	r := invoke(t, setup{}, "--help")
+	r := invoke(t, setup{}, "attach", "--help")
 	wantCode(t, r, 0)
 	wantStdout(t, r, nil)
 	if !strings.Contains(r.stderr, "usage: sbx-acp") || !strings.Contains(r.stderr, "--check") {
 		t.Errorf("stderr = %q, want the usage text", r.stderr)
+	}
+}
+
+func TestUsageWithoutACommand(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		code int
+	}{{nil, 2}, {[]string{"--help"}, 0}, {[]string{"-h"}, 0}, {[]string{"help"}, 0}} {
+		r := invoke(t, setup{}, tc.args...)
+		wantCode(t, r, tc.code)
+		wantStdout(t, r, nil)
+		if r.stderr != usageText {
+			t.Errorf("sbx-acp %q: stderr = %q, want the usage", tc.args, r.stderr)
+		}
 	}
 }
 
@@ -352,12 +445,12 @@ func TestFailures(t *testing.T) {
 		sbxCalls  int
 		noSandbox bool
 	}{
-		{"no arguments", setup{}, nil, 2, []string{"SANDBOX"}, 0, true},
-		{"two sandboxes", setup{}, []string{"a", "b"}, 2, []string{"SANDBOX"}, 0, true},
-		{"sandbox that starts with a dash", setup{}, []string{"--", "-box"}, 2, []string{"SANDBOX"}, 0, true},
-		{"unknown flag", setup{}, []string{"--nope", "box"}, 2, []string{"nope", "usage"}, 0, true},
-		{"sbx executable missing", setup{}, []string{"--sbx", "/nonexistent/sbx", "box"}, 125, []string{"--sbx"}, 0, false},
-		{"unknown sandbox", setup{kits: []string{"echo"}}, []string{"--sbx", fakeSbx, "ghost"}, 125, []string{`sandbox "ghost"`, "could not run a command"}, 1, false},
+		{"no arguments", setup{}, []string{"attach"}, 2, []string{"SANDBOX"}, 0, true},
+		{"two sandboxes", setup{}, []string{"attach", "a", "b"}, 2, []string{"SANDBOX"}, 0, true},
+		{"sandbox that starts with a dash", setup{}, []string{"attach", "--", "-box"}, 2, []string{"SANDBOX"}, 0, true},
+		{"unknown flag", setup{}, []string{"attach", "--nope", "box"}, 2, []string{"nope", "usage"}, 0, true},
+		{"sbx executable missing", setup{}, []string{"attach", "--sbx", "/nonexistent/sbx", "box"}, 125, []string{"--sbx"}, 0, false},
+		{"unknown sandbox", setup{kits: []string{"echo"}}, []string{"attach", "--sbx", fakeSbx, "ghost"}, 125, []string{`sandbox "ghost"`, "could not run a command"}, 1, false},
 		{"image without sh", setup{kits: []string{"echo"}, fault: "no-sh"}, withFake(), 125, []string{"sh and cat"}, 1, false},
 		{"discovery stream cut inside the last descriptor", setup{kits: []string{"echo"}, fault: "truncate:2"}, withFake(), 125, []string{"ended early"}, 1, false},
 		{"discovery stream cut inside the end marker", setup{kits: []string{"echo"}, fault: "truncate:1"}, withFake(), 125, []string{"ended early"}, 1, false},
@@ -368,6 +461,7 @@ func TestFailures(t *testing.T) {
 		{"unresolved kit argument", setup{kits: []string{"argagent"}}, withFake(), 3, []string{"argagent", "kit.args.model"}, 1, false},
 		{"two agents without --agent", setup{kits: []string{"echo", "second"}}, withFake(), 3, []string{"echo", "second", "--agent"}, 1, false},
 		{"--agent names nothing", setup{kits: []string{"echo", "second"}}, withFake("--agent", "nope"), 3, []string{"nope", "echo", "second"}, 1, false},
+		{"bare sandbox name", setup{kits: []string{"echo"}}, []string{"box"}, 2, []string{`unknown command "box"`, "run: sbx-acp attach box", "usage"}, 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

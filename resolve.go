@@ -126,6 +126,52 @@ func readEntry(stem string, c spec.Capability) (key string, e entry) {
 	return key, e
 }
 
+// PublishedKit is one repository's kit descriptor as its registry serves it.
+// Unread is nonempty when the read failed, and says why.
+type PublishedKit struct {
+	Repo       string
+	Descriptor []byte
+	Unread     string
+}
+
+// ACPMixin picks the published mixin that declares a launchable ACP entry for
+// agent. An empty ref with no error means no mixin does, which is valid when
+// the agent's own kit declares ACP.
+func ACPMixin(agent string, published []PublishedKit) (ref string, warnings []string, err error) {
+	want := spec.NormalizeCapabilityName(agent)
+	var repos []string
+	for _, p := range published {
+		if p.Unread != "" {
+			warnings = append(warnings, fmt.Sprintf("kit %s was skipped: %s", p.Repo, p.Unread))
+			continue
+		}
+		d, err := spec.Decode(p.Descriptor)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("kit %s was skipped: %s", p.Repo, oneLine(err)))
+			continue
+		}
+		if d.Kind != spec.KindMixin {
+			continue
+		}
+		for _, c := range spec.DeclaredCapabilities(d.Capabilities) {
+			if c.Type != spec.CapabilityACP {
+				continue
+			}
+			if key, e := readEntry(p.Repo, c); key == want && e.problem == "" && !slices.Contains(repos, p.Repo) {
+				repos = append(repos, p.Repo)
+			}
+		}
+	}
+	switch len(repos) {
+	case 0:
+		return "", warnings, nil
+	case 1:
+		return repos[0] + ":latest", warnings, nil
+	}
+	return "", warnings, fmt.Errorf("mixins %s and %s both declare an ACP launch for it; choose one with --kit REF",
+		strings.Join(repos[:len(repos)-1], ", "), repos[len(repos)-1])
+}
+
 func placeholderIn(v any) string {
 	switch v := v.(type) {
 	case string:

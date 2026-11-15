@@ -14,12 +14,14 @@ Include the commit you built from, your `sbx` version, the steps that reproduce 
 
 ## Scope
 
-`sbx-acp` runs on the host. It reads the Kit descriptors of one sandbox and starts the command that those descriptors declare, inside that sandbox, through `sbx exec`.
+`sbx-acp` runs on the host. `attach` reads the Kit descriptors of one sandbox and starts the command that those descriptors declare, inside that sandbox, through `sbx exec`. `create` first makes the sandbox through `sbx create`, with a mixin that you name or that it finds in the Docker Hub namespace `sbx`.
 
 These are vulnerabilities in `sbx-acp`:
 
 - It runs a program on the host other than `sbx`.
 - It starts a command in the sandbox that no descriptor declares for the selected agent.
 - It writes bytes to stdout that did not come from the agent.
+- It adds a mixin to a new sandbox that you did not name and that is not published in the namespace `sbx`.
+- It removes a sandbox that it did not create.
 
 Problems in `sbx`, in the sandbox runtime, in a Kit, or in the agent itself belong to those projects. Report them there.
