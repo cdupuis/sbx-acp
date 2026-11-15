@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -92,11 +93,13 @@ func TestCheckReportsOnStderrAndStartsNothing(t *testing.T) {
 }
 
 func TestHelpWritesNothingToStdout(t *testing.T) {
-	r := invoke(t, setup{}, "attach", "--help")
-	wantCode(t, r, 0)
-	wantStdout(t, r, nil)
-	if !strings.Contains(r.stderr, "sbx-acp attach") || !strings.Contains(r.stderr, "--check") {
-		t.Errorf("stderr = %q, want the usage text", r.stderr)
+	for _, command := range []string{"attach", "create"} {
+		for _, args := range [][]string{{command, "--help"}, {command, "-h"}, {"help", command}} {
+			r := invoke(t, setup{}, args...)
+			wantCode(t, r, 0)
+			wantStdout(t, r, nil)
+			wantStderr(t, r, "sbx-acp "+command, "--check")
+		}
 	}
 }
 
@@ -109,6 +112,39 @@ func TestUsageWithoutACommand(t *testing.T) {
 		wantCode(t, r, tc.code)
 		wantStdout(t, r, nil)
 		wantStderr(t, r, "Usage:", "attach", "create")
+	}
+}
+
+func TestRunWithoutArgumentsIgnoresTheProcessArguments(t *testing.T) {
+	saved := os.Args
+	os.Args = []string{"sbx-acp", "--help"}
+	t.Cleanup(func() { os.Args = saved })
+	var stderr bytes.Buffer
+	if code := run(nil, &stderr, catalog{}); code != 2 {
+		t.Errorf("exit code = %d, want 2\nstderr: %s", code, stderr.String())
+	}
+}
+
+func TestHiddenCommandsWriteNothingToStdout(t *testing.T) {
+	r := invoke(t, setup{}, "completion", "bash")
+	wantCode(t, r, 2)
+	wantStdout(t, r, nil)
+	wantStderr(t, r, `sbx-acp: unknown command "completion"; to attach to a sandbox, run: sbx-acp attach completion`)
+
+	r = invoke(t, setup{}, "__complete", "attach", "")
+	wantCode(t, r, 0)
+	wantStdout(t, r, nil)
+}
+
+func TestFlagsAfterTheSandboxMatchFlagsBeforeIt(t *testing.T) {
+	s := setup{kits: []string{"claude", "claude-acp"}}
+	before := invoke(t, s, "attach", "--sbx", fakeSbx, "--agent", "claude", "--check", "box")
+	after := invoke(t, s, "attach", "box", "--sbx", fakeSbx, "--agent", "claude", "--check")
+	wantCode(t, after, 0)
+	wantStdout(t, after, nil)
+	wantStderr(t, after, "would run: ")
+	if after.stderr != before.stderr {
+		t.Errorf("flags after SANDBOX: stderr %q; flags before: stderr %q", after.stderr, before.stderr)
 	}
 }
 
@@ -159,6 +195,9 @@ func TestFailures(t *testing.T) {
 			}
 			if !strings.HasPrefix(r.stderr, prefix) {
 				t.Errorf("stderr %q does not start with %q", r.stderr, prefix)
+			}
+			if strings.Contains(r.stderr, "Error:") {
+				t.Errorf("stderr %q repeats the failure as an Error: line", r.stderr)
 			}
 		})
 	}

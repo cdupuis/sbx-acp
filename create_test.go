@@ -92,6 +92,25 @@ func TestCreateWithRmRemovesTheSandboxAfterTheSession(t *testing.T) {
 	wantArgv(t, r.calls[3], "rm", "--force", name)
 }
 
+func TestCreateFlagsAfterThePositionals(t *testing.T) {
+	wd := realTempDir(t)
+	r := invoke(t, setup{createKits: []string{"echo"}, stdin: []byte("ping"), dir: wd}, "create", "echo", "--rm", "--sbx", fakeSbx, "--kit", echoKit)
+	wantCode(t, r, 0)
+	wantStdout(t, r, []byte("ping"))
+	name := createdName(t, r)
+	wantArgv(t, r.calls[0], "create", "--no-progress", "--name", name, "--kit", echoKit, "echo", wd)
+	if len(r.calls) != 4 {
+		t.Fatalf("sbx was called %d times, want create, read, stream, rm: %q", len(r.calls), r.calls)
+	}
+	wantArgv(t, r.calls[3], "rm", "--force", name)
+}
+
+func TestCreateKitWithACommaStaysOneReference(t *testing.T) {
+	r := invoke(t, setup{dir: t.TempDir()}, createWith("--check", "--kit", "a,b", "echo")...)
+	wantCode(t, r, 0)
+	wantStderr(t, r, " --kit a,b echo ")
+}
+
 func TestCreatePassesPathsVerbatim(t *testing.T) {
 	r := invoke(t, setup{createKits: []string{"echo"}, dir: t.TempDir()}, createWith("--kit", echoKit, "echo", "/src/app:/work:ro", "rel/dir")...)
 	wantCode(t, r, 0)
