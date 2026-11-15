@@ -1,0 +1,57 @@
+{
+ "count": 5,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "name": "codex-acp-kit",
+   "namespace": "sbx",
+   "media_types": [
+    "application/vnd.docker.sandbox.kit.v2"
+   ],
+   "content_types": [
+    "sbx_kit"
+   ]
+  },
+  {
+   "name": "claude-acp-kit",
+   "namespace": "sbx",
+   "media_types": [
+    "application/vnd.docker.sandbox.kit.v2"
+   ],
+   "content_types": [
+    "sbx_kit"
+   ]
+  },
+  {
+   "name": "codex-acp",
+   "namespace": "sbx",
+   "media_types": [
+    "application/vnd.docker.sandbox.kit.v3"
+   ],
+   "content_types": [
+    "sbx_kit"
+   ]
+  },
+  {
+   "name": "claude-acp",
+   "namespace": "sbx",
+   "media_types": [
+    "application/vnd.docker.sandbox.kit.v3"
+   ],
+   "content_types": [
+    "sbx_kit"
+   ]
+  },
+  {
+   "name": "pi-acp",
+   "namespace": "sbx",
+   "media_types": [
+    "application/vnd.docker.sandbox.kit.v3"
+   ],
+   "content_types": [
+    "sbx_kit"
+   ]
+  }
+ ]
+}

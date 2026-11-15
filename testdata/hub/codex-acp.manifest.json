@@ -1,0 +1,9 @@
+{
+ "schemaVersion": 2,
+ "mediaType": "application/vnd.oci.image.index.v1+json",
+ "manifests": [],
+ "annotations": {
+  "vnd.docker.sandbox.kit.capabilities": "com.docker.sandbox/acp@1,com.docker.sandbox/agent-context@1,com.docker.sandbox/agent-context@2",
+  "vnd.docker.sandbox.kit.descriptor": "{\"schemaVersion\":\"3\",\"displayName\":\"Codex ACP adapter\",\"description\":\"ACP adapter overlay for Codex. Requires the codex-mixin kit.\",\"version\":\"2.6.0\",\"licenses\":[\"Apache-2.0\"],\"kind\":\"mixin\",\"provides\":[\"codex-acp@2.6.0\"],\"requires\":[\"codex\"],\"capabilities\":[{\"type\":\"com.docker.sandbox/acp@1\",\"optional\":true,\"config\":{\"agent\":\"codex\",\"command\":[\"codex-acp\"],\"env\":{\"INITIAL_AGENT_MODE\":\"agent-full-access\"}},\"description\":\"Drive codex sessions over the Agent Client Protocol\"}]}"
+ }
+}

@@ -1,0 +1,9 @@
+{
+ "schemaVersion": 2,
+ "mediaType": "application/vnd.oci.image.index.v1+json",
+ "manifests": [],
+ "annotations": {
+  "vnd.docker.sandbox.kit.capabilities": "com.docker.sandbox/acp@1,com.docker.sandbox/agent-context@1,com.docker.sandbox/agent-context@2",
+  "vnd.docker.sandbox.kit.descriptor": "{\"schemaVersion\":\"3\",\"displayName\":\"Claude Code ACP adapter\",\"description\":\"ACP adapter overlay for Claude Code. Requires the claude-mixin kit.\",\"version\":\"0.107.0\",\"licenses\":[\"Apache-2.0\"],\"kind\":\"mixin\",\"provides\":[\"claude-acp@0.107.0\"],\"requires\":[\"claude\"],\"capabilities\":[{\"type\":\"com.docker.sandbox/acp@1\",\"optional\":true,\"config\":{\"agent\":\"claude\",\"command\":[\"claude-agent-acp\"]},\"description\":\"Drive claude sessions over the Agent Client Protocol\"}]}"
+ }
+}
