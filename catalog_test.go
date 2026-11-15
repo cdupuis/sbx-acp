@@ -133,6 +133,11 @@ func TestLookup(t *testing.T) {
 				m["claude-acp-other"] = manifest(t, "claude-acp", `\"agent\":\"claude\"`, `\"agent\":\"codex\"`)
 			},
 			ref: "sbx/claude-acp:latest", fetched: []string{"claude-acp", "claude-acp-other"}},
+		{name: "a mixin whose entry cannot be launched is not selected", agent: "claude", extra: []string{"claude-acp-empty"},
+			edit: func(m map[string]string) {
+				m["claude-acp-empty"] = manifest(t, "claude-acp", `\"command\":[\"claude-agent-acp\"]`, `\"command\":[\"\"]`)
+			},
+			ref: "sbx/claude-acp:latest", fetched: []string{"claude-acp", "claude-acp-empty"}},
 		{name: "an unreadable manifest is a warning", agent: "codex",
 			edit:     func(m map[string]string) { delete(m, "codex-acp") },
 			fetched:  []string{"codex-acp"},
