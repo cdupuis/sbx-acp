@@ -99,3 +99,7 @@ go test ./... -count=1
 ```
 
 The tests build the binary and run it against a fake `sbx`, which is the test binary started under the name `sbx`. One test starts the real `claude-agent-acp` adapter when it is on `PATH` and checks that it answers an `initialize` request. That test is skipped on machines without the adapter.
+
+## License
+
+`sbx-acp` is licensed under the [Apache License 2.0](LICENSE).
