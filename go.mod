@@ -1,4 +1,4 @@
-module sbx-acp
+module github.com/cdupuis/sbx-acp
 
 go 1.26.11
 
