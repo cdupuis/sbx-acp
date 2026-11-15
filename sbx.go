@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +12,9 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 const kitRoot = "/usr/share/sandbox/kit"
@@ -96,25 +99,105 @@ func execArgv(sandbox string, l Launch) []string {
 // stream hands this process's stdin and stdout to sbx directly. They are
 // *os.File, so os/exec passes the descriptors through and no copy loop can
 // reorder or drop protocol bytes.
-func stream(sbxPath, sandbox string, l Launch, stderr io.Writer) (code int, err error) {
+func stream(in *interrupts, sbxPath, sandbox string, l Launch, stderr io.Writer) (code int, err error) {
 	cmd := exec.Command(sbxPath, execArgv(sandbox, l)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, stderr
-	// Registered before Start so a signal that lands right after sbx starts is
-	// forwarded instead of killing this process and leaving sbx behind.
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigs)
-	if err := cmd.Start(); err != nil {
-		return 0, err
-	}
+	return in.run(cmd)
+}
+
+// createSandbox leaves stdin disconnected, and sends sbx create's stdout to
+// stderr because sbx create prints its progress there.
+func createSandbox(in *interrupts, sbxPath string, argv []string, stderr io.Writer) (code int, err error) {
+	cmd := exec.Command(sbxPath, argv...)
+	cmd.Stdout, cmd.Stderr = stderr, stderr
+	return in.run(cmd)
+}
+
+// removeSandbox gets no signal forwarding: an interrupt during removal must
+// not leave the sandbox half removed.
+func removeSandbox(sbxPath, name string, stderr io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, sbxPath, "rm", "--force", name)
+	cmd.Stdout, cmd.Stderr = stderr, stderr
+	cmd.WaitDelay = time.Second
+	return cmd.Run()
+}
+
+// errInterrupted means a signal arrived before the child could start, so it
+// was not started.
+var errInterrupted = errors.New("interrupted before sbx started")
+
+// interrupts owns SIGINT and SIGTERM for the whole run. Registering once,
+// before the first child, means a signal between two children is held for
+// the next one instead of killing this process and skipping removal.
+type interrupts struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	ch     chan os.Signal
+	mu     sync.Mutex
+	got    os.Signal
+	child  *os.Process
+}
+
+func watchInterrupts() *interrupts {
+	in := &interrupts{ch: make(chan os.Signal, 1)}
+	in.ctx, in.cancel = context.WithCancel(context.Background())
+	signal.Notify(in.ch, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		for s := range sigs {
-			if cmd.Process.Signal(s) != nil {
-				cmd.Process.Kill()
+		for s := range in.ch {
+			in.mu.Lock()
+			if in.got == nil {
+				in.got = s
+				in.cancel()
 			}
+			if in.child != nil && in.child.Signal(s) != nil {
+				in.child.Kill()
+			}
+			in.mu.Unlock()
 		}
 	}()
-	return exitCode(cmd.Wait()), nil
+	return in
+}
+
+func (in *interrupts) stop() {
+	signal.Stop(in.ch)
+	close(in.ch)
+	in.cancel()
+}
+
+// received returns 128+n for the first signal, or 0 when none arrived.
+func (in *interrupts) received() int {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return signalCode(in.got)
+}
+
+func signalCode(s os.Signal) int {
+	if n, ok := s.(syscall.Signal); ok {
+		return 128 + int(n)
+	}
+	return 0
+}
+
+// run starts cmd, forwards signals to it while it runs, and returns its exit code.
+func (in *interrupts) run(cmd *exec.Cmd) (code int, err error) {
+	in.mu.Lock()
+	if in.got != nil {
+		defer in.mu.Unlock()
+		return signalCode(in.got), errInterrupted
+	}
+	if err := cmd.Start(); err != nil {
+		in.mu.Unlock()
+		return 0, err
+	}
+	in.child = cmd.Process
+	in.mu.Unlock()
+	code = exitCode(cmd.Wait())
+	in.mu.Lock()
+	in.child = nil
+	in.mu.Unlock()
+	return code, nil
 }
 
 func exitCode(err error) int {

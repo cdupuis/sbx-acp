@@ -232,7 +232,7 @@ func invoke(t *testing.T, s setup, args ...string) result {
 }
 
 func withFake(flags ...string) []string {
-	return append(append([]string{"--sbx", fakeSbx}, flags...), "box")
+	return append(append([]string{"attach", "--sbx", fakeSbx}, flags...), "box")
 }
 
 func wantCode(t *testing.T, r result, code int) {
@@ -305,7 +305,7 @@ func TestAgentFlagSelectsOneOfTwo(t *testing.T) {
 }
 
 func TestDefaultSbxIsFoundOnPath(t *testing.T) {
-	r := invoke(t, setup{kits: []string{"echo"}, stdin: []byte("ping"), path: true}, "box")
+	r := invoke(t, setup{kits: []string{"echo"}, stdin: []byte("ping"), path: true}, "attach", "box")
 	wantCode(t, r, 0)
 	wantStdout(t, r, []byte("ping"))
 }
@@ -334,11 +334,25 @@ func TestCheckReportsOnStderrAndStartsNothing(t *testing.T) {
 }
 
 func TestHelpWritesNothingToStdout(t *testing.T) {
-	r := invoke(t, setup{}, "--help")
+	r := invoke(t, setup{}, "attach", "--help")
 	wantCode(t, r, 0)
 	wantStdout(t, r, nil)
 	if !strings.Contains(r.stderr, "usage: sbx-acp") || !strings.Contains(r.stderr, "--check") {
 		t.Errorf("stderr = %q, want the usage text", r.stderr)
+	}
+}
+
+func TestUsageWithoutACommand(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		code int
+	}{{nil, 2}, {[]string{"--help"}, 0}, {[]string{"-h"}, 0}, {[]string{"help"}, 0}} {
+		r := invoke(t, setup{}, tc.args...)
+		wantCode(t, r, tc.code)
+		wantStdout(t, r, nil)
+		if r.stderr != usageText {
+			t.Errorf("sbx-acp %q: stderr = %q, want the usage", tc.args, r.stderr)
+		}
 	}
 }
 
@@ -352,12 +366,12 @@ func TestFailures(t *testing.T) {
 		sbxCalls  int
 		noSandbox bool
 	}{
-		{"no arguments", setup{}, nil, 2, []string{"SANDBOX"}, 0, true},
-		{"two sandboxes", setup{}, []string{"a", "b"}, 2, []string{"SANDBOX"}, 0, true},
-		{"sandbox that starts with a dash", setup{}, []string{"--", "-box"}, 2, []string{"SANDBOX"}, 0, true},
-		{"unknown flag", setup{}, []string{"--nope", "box"}, 2, []string{"nope", "usage"}, 0, true},
-		{"sbx executable missing", setup{}, []string{"--sbx", "/nonexistent/sbx", "box"}, 125, []string{"--sbx"}, 0, false},
-		{"unknown sandbox", setup{kits: []string{"echo"}}, []string{"--sbx", fakeSbx, "ghost"}, 125, []string{`sandbox "ghost"`, "could not run a command"}, 1, false},
+		{"no arguments", setup{}, []string{"attach"}, 2, []string{"SANDBOX"}, 0, true},
+		{"two sandboxes", setup{}, []string{"attach", "a", "b"}, 2, []string{"SANDBOX"}, 0, true},
+		{"sandbox that starts with a dash", setup{}, []string{"attach", "--", "-box"}, 2, []string{"SANDBOX"}, 0, true},
+		{"unknown flag", setup{}, []string{"attach", "--nope", "box"}, 2, []string{"nope", "usage"}, 0, true},
+		{"sbx executable missing", setup{}, []string{"attach", "--sbx", "/nonexistent/sbx", "box"}, 125, []string{"--sbx"}, 0, false},
+		{"unknown sandbox", setup{kits: []string{"echo"}}, []string{"attach", "--sbx", fakeSbx, "ghost"}, 125, []string{`sandbox "ghost"`, "could not run a command"}, 1, false},
 		{"image without sh", setup{kits: []string{"echo"}, fault: "no-sh"}, withFake(), 125, []string{"sh and cat"}, 1, false},
 		{"discovery stream cut inside the last descriptor", setup{kits: []string{"echo"}, fault: "truncate:2"}, withFake(), 125, []string{"ended early"}, 1, false},
 		{"discovery stream cut inside the end marker", setup{kits: []string{"echo"}, fault: "truncate:1"}, withFake(), 125, []string{"ended early"}, 1, false},
@@ -368,6 +382,7 @@ func TestFailures(t *testing.T) {
 		{"unresolved kit argument", setup{kits: []string{"argagent"}}, withFake(), 3, []string{"argagent", "kit.args.model"}, 1, false},
 		{"two agents without --agent", setup{kits: []string{"echo", "second"}}, withFake(), 3, []string{"echo", "second", "--agent"}, 1, false},
 		{"--agent names nothing", setup{kits: []string{"echo", "second"}}, withFake("--agent", "nope"), 3, []string{"nope", "echo", "second"}, 1, false},
+		{"bare sandbox name", setup{kits: []string{"echo"}}, []string{"box"}, 2, []string{`unknown command "box"`, "run: sbx-acp attach box", "usage"}, 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
