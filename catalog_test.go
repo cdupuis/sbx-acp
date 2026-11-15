@@ -53,7 +53,7 @@ func (h *fakeHub) start(t *testing.T) (catalog, *httptest.Server) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	c := dockerHub
+	c := dockerHub()
 	c.hub, c.auth, c.registry = srv.URL, srv.URL, srv.URL
 	return c, srv
 }

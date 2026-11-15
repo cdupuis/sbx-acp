@@ -2,11 +2,12 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -16,116 +17,87 @@ const (
 	exitSbxFailure = 125
 )
 
-const usageText = `usage: sbx-acp attach [--agent NAME] [--sbx PATH] [--check] SANDBOX
-       sbx-acp create [--kit REF]... [--rm] [--sbx PATH] [--check] AGENT [PATH...]
-`
-
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stderr, dockerHub()))
 }
 
-func run(args []string, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, usageText)
-		return exitUsage
+// exitStatus carries the exit code a command chose after printing its own
+// sentences, so run can tell it apart from a usage error.
+type exitStatus int
+
+func (s exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(s)) }
+
+func status(code int) error {
+	if code == 0 {
+		return nil
 	}
-	switch args[0] {
-	case "attach":
-		return runAttach(args[1:], stderr)
-	case "create":
-		return runCreate(args[1:], stderr)
-	case "-h", "--help", "help":
-		fmt.Fprint(stderr, usageText)
+	return exitStatus(code)
+}
+
+func run(args []string, stderr io.Writer, hub catalog) int {
+	root := rootCmd(stderr, hub)
+	// A nil slice makes cobra read os.Args, which under go test are the test
+	// binary's flags.
+	root.SetArgs(append([]string{}, args...))
+	cmd, err := root.ExecuteC()
+	var st exitStatus
+	switch {
+	case err == nil:
 		return 0
+	case errors.As(err, &st):
+		return int(st)
 	}
-	fmt.Fprintf(stderr, "sbx-acp: unknown command %q; to attach to a sandbox, run: sbx-acp attach %s\n", args[0], shellQuote(args[0]))
-	fmt.Fprint(stderr, usageText)
+	fmt.Fprintf(stderr, "sbx-acp: %v\n", err)
+	fmt.Fprint(stderr, cmd.UsageString())
 	return exitUsage
 }
 
-// parseFlags prints the usage and returns the exit code when it fails.
-func parseFlags(fs *flag.FlagSet, args []string, stderr io.Writer) (code int, ok bool) {
-	fs.SetOutput(io.Discard)
-	err := fs.Parse(args)
-	switch {
-	case err == nil:
-		return 0, true
-	case errors.Is(err, flag.ErrHelp):
-		code = 0
-	default:
-		code = exitUsage
-		fmt.Fprintf(stderr, "sbx-acp: %v\n", err)
+func rootCmd(stderr io.Writer, hub catalog) *cobra.Command {
+	root := &cobra.Command{
+		Use:   "sbx-acp",
+		Short: "Start the ACP agent of a Docker sandbox on stdio",
+		Long: "sbx-acp starts the Agent Client Protocol agent of a Docker sandbox on stdio.\n" +
+			"Only the agent's bytes reach stdout. Errors, --check, and help go to stderr.",
+		// Runnable so that no arguments exits 2 and the old bare form reaches
+		// Args: a root that cannot run returns ErrHelp first, which exits 0.
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown command %q; to attach to a sandbox, run: sbx-acp attach %s", args[0], shellQuote(args[0]))
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_ = cmd.Help()
+			return exitStatus(exitUsage)
+		},
+		SilenceErrors:         true,
+		SilenceUsage:          true,
+		DisableFlagsInUseLine: true,
+		CompletionOptions:     cobra.CompletionOptions{DisableDefaultCmd: true},
 	}
-	printUsage(fs, stderr)
-	return code, false
+	// Help, usage, and the hidden __complete command write to Out, which is
+	// stdout unless set, and stdout belongs to the agent.
+	root.SetOut(stderr)
+	root.SetErr(stderr)
+	root.AddCommand(attachCmd(stderr), createCmd(stderr, hub))
+	return root
 }
 
-func printUsage(fs *flag.FlagSet, stderr io.Writer) {
-	fmt.Fprint(stderr, usageText)
-	fs.SetOutput(stderr)
-	fs.PrintDefaults()
+type reporter struct {
+	w       io.Writer
+	subject string
 }
 
-func runAttach(args []string, stderr io.Writer) int {
-	fs := flag.NewFlagSet("sbx-acp attach", flag.ContinueOnError)
-	agent := fs.String("agent", "", "ACP agent to start when the sandbox declares more than one")
-	sbxName := fs.String("sbx", "sbx", "name or path of the sbx executable")
-	check := fs.Bool("check", false, "resolve the launch, print it on stderr, and start nothing")
-	if code, ok := parseFlags(fs, args, stderr); !ok {
-		return code
-	}
-	if fs.NArg() != 1 || fs.Arg(0) == "" || strings.HasPrefix(fs.Arg(0), "-") {
-		fmt.Fprintln(stderr, "sbx-acp: expected exactly one SANDBOX name that does not start with -")
-		printUsage(fs, stderr)
-		return exitUsage
-	}
-	sandbox := fs.Arg(0)
-	sbxPath, err := locateSbx(*sbxName)
-	if err != nil {
-		fmt.Fprintf(stderr, "sbx-acp: sandbox %q: %v\n", sandbox, err)
-		return exitSbxFailure
-	}
-	in := watchInterrupts()
-	defer in.stop()
-	code, _ := attachTo(in, sbxPath, sandbox, *agent, *check, stderr)
-	return code
+func sandboxReporter(w io.Writer, name string) reporter {
+	return reporter{w, fmt.Sprintf("sandbox %q", name)}
 }
 
-// attachTo reads the sandbox's staged kits and starts its ACP agent on stdio.
-// started is true once the agent's stream was started or --check printed.
-func attachTo(in *interrupts, sbxPath, sandbox, agent string, check bool, stderr io.Writer) (code int, started bool) {
-	fail := func(code int, format string, a ...any) (int, bool) {
-		fmt.Fprintf(stderr, "sbx-acp: sandbox %q: %s\n", sandbox, fmt.Sprintf(format, a...))
-		return code, false
-	}
-	kits, err := readKits(sbxPath, sandbox)
-	if err != nil {
-		return fail(exitSbxFailure, "%v", err)
-	}
-	if len(kits) == 0 {
-		return fail(exitNoLaunch, "was not composed from Kits, so it has no staged descriptors under %s", kitRoot)
-	}
-	launch, warnings, err := Resolve(kits, agent)
-	for _, w := range warnings {
-		fmt.Fprintf(stderr, "sbx-acp: sandbox %q: warning: %s\n", sandbox, w)
-	}
-	if err != nil {
-		return fail(exitNoLaunch, "%v", err)
-	}
-	if check {
-		fmt.Fprintf(stderr, "sbx-acp: sandbox %q: agent %s, declared by %s, ACP protocol version %d\n",
-			sandbox, launch.Agent, launch.DeclaredBy, launch.ProtocolVersion)
-		fmt.Fprintf(stderr, "sbx-acp: sandbox %q: would run: %s\n", sandbox, shellLine(append([]string{sbxPath}, execArgv(sandbox, launch)...)))
-		return 0, true
-	}
-	code, err = stream(in, sbxPath, sandbox, launch, stderr)
-	switch {
-	case errors.Is(err, errInterrupted):
-		return code, false
-	case err != nil:
-		return fail(exitSbxFailure, "cannot start sbx: %v", err)
-	}
-	return code, true
+func agentReporter(w io.Writer, agent string) reporter {
+	return reporter{w, fmt.Sprintf("agent %q", agent)}
+}
+
+func (r reporter) say(format string, a ...any) {
+	fmt.Fprintf(r.w, "sbx-acp: %s: %s\n", r.subject, fmt.Sprintf(format, a...))
 }
 
 func shellLine(argv []string) string {

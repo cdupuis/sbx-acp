@@ -32,16 +32,18 @@ type catalog struct {
 	client              *http.Client
 }
 
-var dockerHub = catalog{
-	hub:      "https://hub.docker.com",
-	auth:     "https://auth.docker.io",
-	registry: "https://registry-1.docker.io",
-	client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if req.URL.Host != via[0].URL.Host {
-			return fmt.Errorf("refusing a redirect to %s", req.URL.Host)
-		}
-		return nil
-	}},
+func dockerHub() catalog {
+	return catalog{
+		hub:      "https://hub.docker.com",
+		auth:     "https://auth.docker.io",
+		registry: "https://registry-1.docker.io",
+		client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Host != via[0].URL.Host {
+				return fmt.Errorf("refusing a redirect to %s", req.URL.Host)
+			}
+			return nil
+		}},
+	}
 }
 
 // Published returns the kit descriptors of the repositories in namespace whose

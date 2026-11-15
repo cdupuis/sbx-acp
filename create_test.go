@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 const echoKit = "docker.io/example/echo-acp:1"
@@ -28,15 +26,6 @@ func createdName(t *testing.T, r result) string {
 		t.Fatalf("first sbx call = %q, want create --no-progress --name NAME ...\nstderr: %s", r.calls, r.stderr)
 	}
 	return r.calls[0][3]
-}
-
-func wantStderr(t *testing.T, r result, frags ...string) {
-	t.Helper()
-	for _, frag := range frags {
-		if !strings.Contains(r.stderr, frag) {
-			t.Errorf("stderr %q does not contain %q", r.stderr, frag)
-		}
-	}
 }
 
 // realTempDir is a temporary directory under the path the kernel reports for
@@ -103,6 +92,25 @@ func TestCreateWithRmRemovesTheSandboxAfterTheSession(t *testing.T) {
 	wantArgv(t, r.calls[3], "rm", "--force", name)
 }
 
+func TestCreateFlagsAfterThePositionals(t *testing.T) {
+	wd := realTempDir(t)
+	r := invoke(t, setup{createKits: []string{"echo"}, stdin: []byte("ping"), dir: wd}, "create", "echo", "--rm", "--sbx", fakeSbx, "--kit", echoKit)
+	wantCode(t, r, 0)
+	wantStdout(t, r, []byte("ping"))
+	name := createdName(t, r)
+	wantArgv(t, r.calls[0], "create", "--no-progress", "--name", name, "--kit", echoKit, "echo", wd)
+	if len(r.calls) != 4 {
+		t.Fatalf("sbx was called %d times, want create, read, stream, rm: %q", len(r.calls), r.calls)
+	}
+	wantArgv(t, r.calls[3], "rm", "--force", name)
+}
+
+func TestCreateKitWithACommaStaysOneReference(t *testing.T) {
+	r := invoke(t, setup{dir: t.TempDir()}, createWith("--check", "--kit", "a,b", "echo")...)
+	wantCode(t, r, 0)
+	wantStderr(t, r, " --kit a,b echo ")
+}
+
 func TestCreatePassesPathsVerbatim(t *testing.T) {
 	r := invoke(t, setup{createKits: []string{"echo"}, dir: t.TempDir()}, createWith("--kit", echoKit, "echo", "/src/app:/work:ro", "rel/dir")...)
 	wantCode(t, r, 0)
@@ -129,7 +137,7 @@ func TestCreateUsageErrors(t *testing.T) {
 			`sbx-acp: agent "echo": refusing to mount "` + home + `" as the workspace`},
 		{"kit reference as the agent", setup{}, createWith("--kit", echoKit, "sbx/claude:latest"),
 			`sbx-acp: agent "sbx/claude:latest": is not an agent name; use a built-in agent such as claude, codex, or opencode`},
-		{"PATH that starts with a dash", setup{}, createWith("--kit", echoKit, "echo", "-v"), `"-v"`},
+		{"PATH that starts with a dash", setup{}, createWith("--kit", echoKit, "echo", "--", "-v"), `PATH "-v" must not be empty or start with -`},
 		{"no agent", setup{}, createWith("--kit", echoKit), "AGENT"},
 		{"unknown flag", setup{}, createWith("--nope", "echo"), "nope"},
 	}
@@ -188,33 +196,6 @@ func TestCreateRemovesASandboxThatNeverStartedAnAgent(t *testing.T) {
 	}
 }
 
-// startAndSignal starts sbx-acp, waits until the fake sbx has logged calls
-// calls, and sends SIGTERM. Stdin stays open so the agent cannot finish first.
-func startAndSignal(t *testing.T, s setup, calls int, args ...string) result {
-	t.Helper()
-	ss := newSession(t, s, args...)
-	stdin, err := ss.cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stdin.Close()
-	// Buffers would make Wait block on pipes the orphaned agent still holds, and
-	// closing stdin to release them lets the agent exit 0 before the signal lands.
-	ss.cmd.Stdout, ss.cmd.Stderr = nil, nil
-	if err := ss.cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	for deadline := time.Now().Add(10 * time.Second); len(ss.calls(t)) < calls; time.Sleep(10 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("sbx-acp never reached sbx call %d: %q", calls, ss.calls(t))
-		}
-	}
-	if err := ss.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	return ss.wait(t)
-}
-
 func TestCreateSignalMidStreamStillRemovesWithRm(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("signal forwarding is exercised on Unix only")
@@ -238,20 +219,10 @@ func TestCreateSignalDuringCreateIsForwardedAndRemovesNothing(t *testing.T) {
 	}
 }
 
-// useHub points the create command at h for the rest of the test.
-func useHub(t *testing.T, h *fakeHub) *httptest.Server {
-	t.Helper()
-	c, srv := h.start(t)
-	saved := dockerHub
-	dockerHub = c
-	t.Cleanup(func() { dockerHub = saved })
-	return srv
-}
-
 func TestCreateCheckUsesTheLookup(t *testing.T) {
-	useHub(t, &fakeHub{list: listing(t), manifests: realManifests(t)})
+	hub, _ := (&fakeHub{list: listing(t), manifests: realManifests(t)}).start(t)
 	var stderr bytes.Buffer
-	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr)
+	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr, hub)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0\nstderr: %s", code, stderr.String())
 	}
@@ -266,10 +237,10 @@ func TestCreateCheckUsesTheLookup(t *testing.T) {
 }
 
 func TestCreateExitsFourWhenTheCatalogIsDown(t *testing.T) {
-	srv := useHub(t, &fakeHub{})
+	hub, srv := (&fakeHub{}).start(t)
 	srv.Close()
 	var stderr bytes.Buffer
-	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr)
+	code := run([]string{"create", "--sbx", fakeSbx, "--check", "claude"}, &stderr, hub)
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4\nstderr: %s", code, stderr.String())
 	}
@@ -280,8 +251,7 @@ func TestCreateExitsFourWhenTheCatalogIsDown(t *testing.T) {
 }
 
 func TestCreateWithoutAMixinSuggestsKitWhenNoAgentStarts(t *testing.T) {
-	h := &fakeHub{list: listing(t), manifests: realManifests(t)}
-	useHub(t, h)
+	hub, _ := (&fakeHub{list: listing(t), manifests: realManifests(t)}).start(t)
 	tmp := t.TempDir()
 	root, template, log := filepath.Join(tmp, "sandboxes"), filepath.Join(tmp, "template"), filepath.Join(tmp, "calls.jsonl")
 	stageFixtures(t, template, []string{"claude"})
@@ -290,7 +260,7 @@ func TestCreateWithoutAMixinSuggestsKitWhenNoAgentStarts(t *testing.T) {
 	t.Setenv("FAKE_SBX_LOG", log)
 	t.Setenv("FAKE_SBX_FAULT", "")
 	var stderr bytes.Buffer
-	code := run([]string{"create", "--sbx", fakeSbx, "opencode", tmp}, &stderr)
+	code := run([]string{"create", "--sbx", fakeSbx, "opencode", tmp}, &stderr, hub)
 	if code != 3 {
 		t.Fatalf("exit code = %d, want 3\nstderr: %s", code, stderr.String())
 	}
