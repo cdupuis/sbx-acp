@@ -15,7 +15,7 @@ go test ./... -count=1
 
 `gofmt -l .` must print nothing. The tests need `sh` on `PATH`. One test starts the real `claude-agent-acp` adapter and is skipped on machines that do not have it.
 
-Every pull request also runs these in GitHub Actions, from `.github/workflows/ci.yml`. The lint job runs `golangci-lint` with the settings in `.golangci.yml`. The build job compiles for Linux, macOS, and Windows. The test job runs the tests with the race detector on Linux and macOS.
+Every pull request also runs these in GitHub Actions, from `.github/workflows/ci.yml`. The lint job runs `golangci-lint` with the settings in `.golangci.yml`. The build job compiles for Linux, macOS, and Windows. The test job runs the tests with the race detector on Linux, then once more under a symlinked temporary directory, which is how macOS lays out its temporary files. All jobs use Linux runners, because macOS and Windows runners cost more in a private repository.
 
 ## Rules a change must keep
 

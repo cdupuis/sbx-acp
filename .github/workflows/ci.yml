@@ -28,18 +28,6 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
-    env:
-      GOOS: ${{ matrix.goos }}
-      GOARCH: ${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,15 +35,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go build ./...
-      - run: go vet ./...
+      # One job for every target: a private repository pays for each job, rounded up to a minute.
+      - name: Build and vet for every target
+        run: |
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            echo "::group::$target"
+            GOOS=${target%/*} GOARCH=${target#*/} go build ./...
+            GOOS=${target%/*} GOARCH=${target#*/} go vet ./...
+            echo "::endgroup::"
+          done
 
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,3 +55,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./... -count=1 -race
+      # macOS keeps its temporary files behind a symlink. This run catches code
+      # that compares paths without resolving them, without a macOS runner.
+      - name: Test under a symlinked temporary directory
+        run: |
+          mkdir "$RUNNER_TEMP/real" && ln -s "$RUNNER_TEMP/real" "$RUNNER_TEMP/link"
+          TMPDIR="$RUNNER_TEMP/link" go test ./... -count=1
