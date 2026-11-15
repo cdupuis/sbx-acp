@@ -118,7 +118,7 @@ func TestCreateUsageErrors(t *testing.T) {
 			`sbx-acp: agent "echo": refusing to mount "` + home + `" as the workspace`},
 		{"kit reference as the agent", setup{}, createWith("--kit", echoKit, "sbx/claude:latest"),
 			`sbx-acp: agent "sbx/claude:latest": is not an agent name; use a built-in agent such as claude, codex, or opencode`},
-		{"PATH that starts with a dash", setup{}, createWith("--kit", echoKit, "echo", "-v"), `"-v"`},
+		{"PATH that starts with a dash", setup{}, createWith("--kit", echoKit, "echo", "--", "-v"), `PATH "-v" must not be empty or start with -`},
 		{"no agent", setup{}, createWith("--kit", echoKit), "AGENT"},
 		{"unknown flag", setup{}, createWith("--nope", "echo"), "nope"},
 	}

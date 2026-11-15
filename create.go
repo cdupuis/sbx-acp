@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 const lookupTimeout = 15 * time.Second
@@ -95,33 +96,49 @@ func sandboxName(agent string, rnd io.Reader) (string, error) {
 	return "acp-" + agent + "-" + hex.EncodeToString(b[:]), nil
 }
 
-func runCreate(args []string, stderr io.Writer, hub catalog) int {
-	fs := flag.NewFlagSet("sbx-acp create", flag.ContinueOnError)
-	var kits []string
-	fs.Func("kit", "ACP mixin reference for sbx create --kit, repeatable; skips the Docker Hub lookup", func(s string) error {
-		kits = append(kits, s)
-		return nil
-	})
-	rm := fs.Bool("rm", false, "remove the sandbox when the session ends")
-	sbxName := fs.String("sbx", "sbx", "name or path of the sbx executable")
-	check := fs.Bool("check", false, "look up the mixin, print the sbx create command on stderr, and create nothing")
-	if code, ok := parseFlags(fs, args, stderr); !ok {
-		return code
+type createOptions struct {
+	kits  []string
+	rm    bool
+	sbx   string
+	check bool
+}
+
+func createCmd(stderr io.Writer, hub catalog) *cobra.Command {
+	var o createOptions
+	cmd := &cobra.Command{
+		Use:   "create [flags] AGENT [PATH...]",
+		Short: "Create a sandbox for an agent, then start its ACP agent",
+		Example: "  sbx-acp create claude --rm\n" +
+			"  sbx-acp create claude --kit sbx/claude-acp:latest --check",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return errors.New("expected an AGENT name, then optional PATH arguments")
+			}
+			return nil
+		},
+		RunE: func(_ *cobra.Command, args []string) error {
+			return status(runCreate(o, args[0], args[1:], stderr, hub))
+		},
 	}
-	if fs.NArg() == 0 {
-		fmt.Fprintln(stderr, "sbx-acp: expected an AGENT name, then optional PATH arguments")
-		printUsage(fs, stderr)
-		return exitUsage
-	}
+	f := cmd.Flags()
+	// StringArray, not StringSlice: a slice flag would split a REF on commas.
+	f.StringArrayVar(&o.kits, "kit", nil, "ACP mixin `REF` for sbx create --kit, repeatable; skips the Docker Hub lookup")
+	f.BoolVar(&o.rm, "rm", false, "remove the sandbox when the session ends")
+	f.StringVar(&o.sbx, "sbx", "sbx", "name or `PATH` of the sbx executable")
+	f.BoolVar(&o.check, "check", false, "look up the mixin, print the sbx create command on stderr, and create nothing")
+	return cmd
+}
+
+func runCreate(o createOptions, agent string, paths []string, stderr io.Writer, hub catalog) int {
 	cwd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
-	plan, err := planCreate(fs.Arg(0), kits, fs.Args()[1:], cwd, home, rand.Reader)
+	plan, err := planCreate(agent, o.kits, paths, cwd, home, rand.Reader)
 	if err != nil {
 		fmt.Fprintf(stderr, "sbx-acp: %v\n", err)
 		return exitUsage
 	}
 	say := agentReporter(stderr, plan.Agent).say
-	sbxPath, err := locateSbx(*sbxName)
+	sbxPath, err := locateSbx(o.sbx)
 	if err != nil {
 		say("%v", err)
 		return exitSbxFailure
@@ -155,7 +172,7 @@ func runCreate(args []string, stderr io.Writer, hub catalog) int {
 			source, plan.Kits = fmt.Sprintf("ACP mixin %s, found on Docker Hub", ref), []string{ref}
 		}
 	}
-	if *check {
+	if o.check {
 		say("%s", source)
 		say("would run: %s", shellLine(append([]string{sbxPath}, plan.argv()...)))
 		return 0
@@ -180,7 +197,7 @@ func runCreate(args []string, stderr io.Writer, hub catalog) int {
 	}
 
 	code, started := attachTo(in, sbxPath, plan.Name, plan.Agent, false, stderr)
-	if started && !*rm {
+	if started && !o.rm {
 		return code
 	}
 	if err := removeSandbox(sbxPath, plan.Name, stderr); err != nil {

@@ -2,34 +2,51 @@ package main
 
 import (
 	"errors"
-	"flag"
-	"fmt"
 	"io"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
-func runAttach(args []string, stderr io.Writer) int {
-	fs := flag.NewFlagSet("sbx-acp attach", flag.ContinueOnError)
-	agent := fs.String("agent", "", "ACP agent to start when the sandbox declares more than one")
-	sbxName := fs.String("sbx", "sbx", "name or path of the sbx executable")
-	check := fs.Bool("check", false, "resolve the launch, print it on stderr, and start nothing")
-	if code, ok := parseFlags(fs, args, stderr); !ok {
-		return code
+type attachOptions struct {
+	agent string
+	sbx   string
+	check bool
+}
+
+func attachCmd(stderr io.Writer) *cobra.Command {
+	var o attachOptions
+	cmd := &cobra.Command{
+		Use:   "attach [flags] SANDBOX",
+		Short: "Start the ACP agent of an existing sandbox",
+		Example: "  sbx-acp attach my-sandbox\n" +
+			"  sbx-acp attach my-sandbox --agent claude --check",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+				return errors.New("expected exactly one SANDBOX name that does not start with -")
+			}
+			return nil
+		},
+		RunE: func(_ *cobra.Command, args []string) error {
+			return status(runAttach(o, args[0], stderr))
+		},
 	}
-	if fs.NArg() != 1 || fs.Arg(0) == "" || strings.HasPrefix(fs.Arg(0), "-") {
-		fmt.Fprintln(stderr, "sbx-acp: expected exactly one SANDBOX name that does not start with -")
-		printUsage(fs, stderr)
-		return exitUsage
-	}
-	sandbox := fs.Arg(0)
-	sbxPath, err := locateSbx(*sbxName)
+	f := cmd.Flags()
+	f.StringVar(&o.agent, "agent", "", "ACP agent `NAME` to start when the sandbox declares more than one")
+	f.StringVar(&o.sbx, "sbx", "sbx", "name or `PATH` of the sbx executable")
+	f.BoolVar(&o.check, "check", false, "resolve the launch, print it on stderr, and start nothing")
+	return cmd
+}
+
+func runAttach(o attachOptions, sandbox string, stderr io.Writer) int {
+	sbxPath, err := locateSbx(o.sbx)
 	if err != nil {
 		sandboxReporter(stderr, sandbox).say("%v", err)
 		return exitSbxFailure
 	}
 	in := watchInterrupts()
 	defer in.stop()
-	code, _ := attachTo(in, sbxPath, sandbox, *agent, *check, stderr)
+	code, _ := attachTo(in, sbxPath, sandbox, o.agent, o.check, stderr)
 	return code
 }
 

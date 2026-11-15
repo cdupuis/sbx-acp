@@ -95,7 +95,7 @@ func TestHelpWritesNothingToStdout(t *testing.T) {
 	r := invoke(t, setup{}, "attach", "--help")
 	wantCode(t, r, 0)
 	wantStdout(t, r, nil)
-	if !strings.Contains(r.stderr, "usage: sbx-acp") || !strings.Contains(r.stderr, "--check") {
+	if !strings.Contains(r.stderr, "sbx-acp attach") || !strings.Contains(r.stderr, "--check") {
 		t.Errorf("stderr = %q, want the usage text", r.stderr)
 	}
 }
@@ -108,9 +108,7 @@ func TestUsageWithoutACommand(t *testing.T) {
 		r := invoke(t, setup{}, tc.args...)
 		wantCode(t, r, tc.code)
 		wantStdout(t, r, nil)
-		if r.stderr != usageText {
-			t.Errorf("sbx-acp %q: stderr = %q, want the usage", tc.args, r.stderr)
-		}
+		wantStderr(t, r, "Usage:", "attach", "create")
 	}
 }
 
@@ -127,7 +125,7 @@ func TestFailures(t *testing.T) {
 		{"no arguments", setup{}, []string{"attach"}, 2, []string{"SANDBOX"}, 0, true},
 		{"two sandboxes", setup{}, []string{"attach", "a", "b"}, 2, []string{"SANDBOX"}, 0, true},
 		{"sandbox that starts with a dash", setup{}, []string{"attach", "--", "-box"}, 2, []string{"SANDBOX"}, 0, true},
-		{"unknown flag", setup{}, []string{"attach", "--nope", "box"}, 2, []string{"nope", "usage"}, 0, true},
+		{"unknown flag", setup{}, []string{"attach", "--nope", "box"}, 2, []string{"nope", "Usage:"}, 0, true},
 		{"sbx executable missing", setup{}, []string{"attach", "--sbx", "/nonexistent/sbx", "box"}, 125, []string{"--sbx"}, 0, false},
 		{"unknown sandbox", setup{kits: []string{"echo"}}, []string{"attach", "--sbx", fakeSbx, "ghost"}, 125, []string{`sandbox "ghost"`, "could not run a command"}, 1, false},
 		{"image without sh", setup{kits: []string{"echo"}, fault: "no-sh"}, withFake(), 125, []string{"sh and cat"}, 1, false},
@@ -140,7 +138,7 @@ func TestFailures(t *testing.T) {
 		{"unresolved kit argument", setup{kits: []string{"argagent"}}, withFake(), 3, []string{"argagent", "kit.args.model"}, 1, false},
 		{"two agents without --agent", setup{kits: []string{"echo", "second"}}, withFake(), 3, []string{"echo", "second", "--agent"}, 1, false},
 		{"--agent names nothing", setup{kits: []string{"echo", "second"}}, withFake("--agent", "nope"), 3, []string{"nope", "echo", "second"}, 1, false},
-		{"bare sandbox name", setup{kits: []string{"echo"}}, []string{"box"}, 2, []string{`unknown command "box"`, "run: sbx-acp attach box", "usage"}, 0, true},
+		{"bare sandbox name", setup{kits: []string{"echo"}}, []string{"box"}, 2, []string{`unknown command "box"`, "run: sbx-acp attach box", "Usage:"}, 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
