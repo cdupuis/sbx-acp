@@ -22,7 +22,7 @@ sbx-acp attach [--agent NAME] [--sbx PATH] [--check] SANDBOX
 sbx-acp create [--kit REF]... [--rm] [--sbx PATH] [--check] AGENT [PATH...]
 ```
 
-Flags go before the positional arguments. Nothing except the agent's protocol bytes reaches stdout. Errors, warnings, `--check`, and `--help` all write to stderr.
+Flags can go before or after the positional arguments, as with `sbx`. `sbx-acp --help` and `sbx-acp COMMAND --help` describe them. Nothing except the agent's protocol bytes reaches stdout. Errors, warnings, `--check`, and `--help` all write to stderr.
 
 Both subcommands take these flags.
 
