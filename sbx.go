@@ -99,12 +99,14 @@ func execArgv(sandbox string, l Launch) []string {
 func stream(sbxPath, sandbox string, l Launch, stderr io.Writer) (code int, err error) {
 	cmd := exec.Command(sbxPath, execArgv(sandbox, l)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, stderr
-	if err := cmd.Start(); err != nil {
-		return 0, err
-	}
+	// Registered before Start so a signal that lands right after sbx starts is
+	// forwarded instead of killing this process and leaving sbx behind.
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigs)
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
 	go func() {
 		for s := range sigs {
 			if cmd.Process.Signal(s) != nil {

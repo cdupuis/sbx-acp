@@ -412,6 +412,9 @@ func TestSignalIsForwardedToSbx(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stdin.Close()
+	// Buffers would make Wait block on pipes the orphaned agent still holds, and
+	// closing stdin to release them lets the agent exit 0 before the signal lands.
+	ss.cmd.Stdout, ss.cmd.Stderr = nil, nil
 	if err := ss.cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -420,11 +423,9 @@ func TestSignalIsForwardedToSbx(t *testing.T) {
 			t.Fatal("sbx-acp never started the stream")
 		}
 	}
-	time.Sleep(200 * time.Millisecond)
 	if err := ss.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
-	stdin.Close() // lets the orphaned cat exit so its stdout pipe closes
 	r := ss.wait(t)
 	wantCode(t, r, 128+int(syscall.SIGTERM))
 }
