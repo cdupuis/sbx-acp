@@ -169,7 +169,7 @@ func fakeExec(args []string) int {
 	}
 	if os.Getenv("FAKE_SBX_FAULT") == "die-by-kill" {
 		self, _ := os.FindProcess(os.Getpid())
-		self.Signal(syscall.SIGKILL)
+		_ = self.Signal(syscall.SIGKILL)
 		time.Sleep(10 * time.Second)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
@@ -277,7 +277,12 @@ func (ss *session) calls(t *testing.T) [][]string {
 		return nil
 	}
 	var calls [][]string
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+	for _, line := range strings.Split(string(b), "\n") {
+		// The fake creates the log before it writes its line, so a poll can
+		// find the file empty.
+		if line == "" {
+			continue
+		}
 		var argv []string
 		if err := json.Unmarshal([]byte(line), &argv); err != nil {
 			t.Fatalf("bad call log line %q: %v", line, err)

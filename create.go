@@ -67,10 +67,19 @@ func planCreate(agent string, kits, paths []string, cwd, home string, rnd io.Rea
 // in / or the home directory, and mounting either would expose far more.
 func defaultWorkspace(cwd, home string) (string, error) {
 	ws := filepath.Clean(cwd)
-	if filepath.Dir(ws) == ws || home != "" && ws == filepath.Clean(home) {
+	if real := resolved(ws); filepath.Dir(real) == real || home != "" && real == resolved(home) {
 		return "", fmt.Errorf("refusing to mount %q as the workspace; start sbx-acp in the project directory or pass a PATH", ws)
 	}
 	return ws, nil
+}
+
+// resolved follows symlinks, so a home directory that is reached through one
+// still compares equal to the working directory the kernel reports.
+func resolved(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Clean(path)
 }
 
 // sandboxName fits sbx's 63-character limit.
