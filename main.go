@@ -12,6 +12,7 @@ import (
 const (
 	exitUsage      = 2
 	exitNoLaunch   = 3
+	exitCatalog    = 4
 	exitSbxFailure = 125
 )
 
@@ -31,6 +32,8 @@ func run(args []string, stderr io.Writer) int {
 	switch args[0] {
 	case "attach":
 		return runAttach(args[1:], stderr)
+	case "create":
+		return runCreate(args[1:], stderr)
 	case "-h", "--help", "help":
 		fmt.Fprint(stderr, usageText)
 		return 0
