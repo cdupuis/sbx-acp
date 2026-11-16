@@ -164,12 +164,12 @@ func TestCreateCanLaunchWithAPathThatHasNoShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	command := filepath.Join(dir, "agent")
+	command := filepath.Join(dir, "cat")
 	if err := os.Symlink(cat, command); err != nil {
 		t.Fatal(err)
 	}
 	ss := newSession(t, setup{createKits: []string{"echo"}, dir: dir, stdin: []byte("hello")}, createWith("--rm", "--kit", echoKit, "echo")...)
-	setCreateLaunch(t, ss, []string{command}, map[string]string{"PATH": dir})
+	setCreateLaunch(t, ss, []string{"cat"}, map[string]string{"PATH": dir})
 	if err := ss.cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
