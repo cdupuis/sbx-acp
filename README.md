@@ -10,10 +10,10 @@ Both check that the sandbox declares the `com.docker.sandbox/acp@1` capability, 
 ## Install
 
 ```
-go build -o sbx-acp .
+go install .
 ```
 
-Put the binary on your `PATH`. The `go.mod` declares Go 1.26.11, the version this was built with. The kit spec module it depends on, `github.com/docker/sandbox-kit-spec/v3` at `v3.0.0-m.12`, declares Go 1.26.10. The build needs a Go toolchain at least that new. The module is pre-stable, so the pin is deliberate.
+Make sure Go's install directory is on your `PATH`. The `go.mod` declares Go 1.26.11, the version this was built with. The kit spec module it depends on, `github.com/docker/sandbox-kit-spec/v3` at `v3.0.0-m.12`, declares Go 1.26.10. The build needs a Go toolchain at least that new. The module is pre-stable, so the pin is deliberate.
 
 ## Usage
 
@@ -54,13 +54,29 @@ Both subcommands take these flags.
 - `--kit REF` names a mixin for `sbx create --kit`. You can repeat it. If you give it, `sbx-acp` adds exactly those mixins and does not look one up.
 - `PATH...` are the workspaces, in the form `sbx create` takes. Without a `PATH` the workspace is the working directory. `sbx-acp` refuses to default to `/` or your home directory.
 
+Add Codex and Claude to Zed's settings JSON:
+
 ```json
 {
   "agent_servers": {
-    "Claude in a new sandbox": {
+    "Codex": {
       "type": "custom",
       "command": "sbx-acp",
-      "args": ["create", "--rm", "claude"],
+      "args": [
+        "create",
+        "--rm",
+        "codex"
+      ],
+      "env": {}
+    },
+    "Claude": {
+      "type": "custom",
+      "command": "sbx-acp",
+      "args": [
+        "create",
+        "--rm",
+        "claude"
+      ],
       "env": {}
     }
   }
