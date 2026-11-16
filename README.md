@@ -54,13 +54,29 @@ Both subcommands take these flags.
 - `--kit REF` names a mixin for `sbx create --kit`. You can repeat it. If you give it, `sbx-acp` adds exactly those mixins and does not look one up.
 - `PATH...` are the workspaces, in the form `sbx create` takes. Without a `PATH` the workspace is the working directory. `sbx-acp` refuses to default to `/` or your home directory.
 
+Add Codex and Claude to Zed's settings JSON:
+
 ```json
 {
   "agent_servers": {
-    "Claude in a new sandbox": {
+    "Codex": {
       "type": "custom",
       "command": "sbx-acp",
-      "args": ["create", "--rm", "claude"],
+      "args": [
+        "create",
+        "--rm",
+        "codex"
+      ],
+      "env": {}
+    },
+    "Claude": {
+      "type": "custom",
+      "command": "sbx-acp",
+      "args": [
+        "create",
+        "--rm",
+        "claude"
+      ],
       "env": {}
     }
   }
