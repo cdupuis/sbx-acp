@@ -73,16 +73,19 @@ Zed starts a custom agent server in the project root. `sbx` mounts a workspace a
 
 ## How it works
 
-Every Kit stages its published descriptor at `/usr/share/sandbox/kit/<name>/kit.yaml` inside the sandbox. `sbx-acp` reads those files with one `sbx exec` call, resolves the ACP launch from them, and starts the agent with a second call.
+Every Kit stages its published descriptor at `/usr/share/sandbox/kit/<name>/kit.yaml` inside the sandbox. `sbx-acp` reads those files, checks that the resolved command is executable, and starts the agent through three `sbx exec` calls.
 
 ```
 sbx exec SANDBOX sh -c '<script that prints every kit.yaml, framed with NUL bytes>'
+sbx exec SANDBOX sh -c '<script that checks the command file and its execute permission>' sbx-acp COMMAND [PATH]
 sbx exec -i [-e KEY=VALUE]... SANDBOX COMMAND [ARG...]
 ```
 
 The first call has no stdin and no TTY. The script needs only `sh` and `cat`. A stream without its end marker counts as a truncated read and fails.
 
-The second call is the stream. `sbx-acp` gives `sbx` its own stdin and stdout descriptors, so no copy loop sits between the client and the agent. Environment values from the descriptor go through `-e`, sorted by key. `sbx-acp` never passes `-t`. It forwards SIGINT and SIGTERM to `sbx` and exits with the code `sbx` returned. If a signal ended `sbx`, the exit code is 128 plus the signal number.
+The executable check also gets no stdin or TTY. It uses the sandbox's default user and working directory. It searches the launch's `PATH` when the descriptor overrides it. `--check` resolves the descriptor without checking whether the executable exists.
+
+The third call is the stream. `sbx-acp` gives `sbx` its own stdin and stdout descriptors, so no copy loop sits between the client and the agent. Environment values from the descriptor go through `-e`, sorted by key. `sbx-acp` never passes `-t`. It forwards SIGINT and SIGTERM during discovery, the executable check, and the stream. An interrupt before the stream exits with 128 plus the signal number, even if `sbx` exits 0. Once the stream starts, `sbx-acp` returns the code from `sbx`, or 128 plus the signal number if a signal ended `sbx`.
 
 `Resolve` in `resolve.go` applies the capability contract to the decoded descriptors.
 
@@ -105,7 +108,9 @@ Some agents declare ACP in their own kit. Others need an adapter mixin. `create`
 4. It runs `sbx create --no-progress --name NAME [--kit REF] AGENT PATH...`. `sbx create` gets no stdin, and its output goes to stderr.
 5. It reads the new sandbox the way `attach` does and starts the agent. The sandbox has the final word on whether the agent speaks ACP.
 
-`sbx-acp` removes a sandbox only if its own `sbx create` succeeded, and only in two cases. Either you passed `--rm`, or the sandbox never started an agent. It never removes a sandbox after a failed `sbx create`, because that failure does not prove the name is its own.
+`sbx-acp` removes a sandbox only if its own `sbx create` succeeded, and only in two cases. Either you passed `--rm`, or discovery, launch resolution, or the executable check failed before the stream started. It never removes a sandbox after a failed `sbx create`, because that failure does not prove the name is its own.
+
+After the streaming `sbx exec` starts, its status cannot prove whether the agent ran. For example, an agent can return 127 itself. Without `--rm`, `sbx-acp` retains the sandbox after a stream attempt, including failures that the executable check cannot detect.
 
 ## What counts as public
 
@@ -126,7 +131,8 @@ It never opens the sandboxd socket and imports no internal Go package. Those are
 | 2 | Usage error. |
 | 3 | No launchable ACP agent for the request, in the sandbox or among the published mixins. |
 | 4 | `create` could not read the kit catalog on Docker Hub. |
-| 125 | `sbx` is missing, `sbx create` failed, or the sandbox could not be reached or read. |
+| 125 | `sbx` is missing, `sbx create` failed, or a sandbox read or executable check failed. |
+| 127 | The declared launch command is missing or not executable. |
 | other | After the stream starts, the code that `sbx exec` returned. |
 
 `--help` exits 0. A failure prints `sbx-acp: sandbox "NAME": <sentence>` on stderr, or `sbx-acp: agent "NAME": <sentence>` before `create` has a sandbox. Usage errors omit that part.
@@ -135,6 +141,7 @@ It never opens the sandboxd socket and imports no internal Go package. Those are
 
 - Entries that use kit arguments or kit environment references are refused. The values are chosen at sandbox creation and are not readable from outside, and substituting defaults could start a different command than the runtime would.
 - The sandbox image needs `sh` and `cat`.
+- The executable check cannot detect a missing interpreter or dynamic loader, a failure inside a shell command, or a file that changes after the check. Use `--rm` to remove a newly created sandbox after those stream failures.
 - `sbx exec` may give the command a different working directory or user than an agent session would. The capability describes launch under an agent session. This tool has not checked how the two differ.
 - The real `sbx` binary was not available where this was written. The `sbx exec`, `sbx create`, and `sbx rm` calls were exercised only through a stand-in that implements their documented usage. These assumptions are taken from the published reference and are not verified: `sbx` passes the arguments after `SANDBOX` through untouched, it half-closes stdin on EOF, and `sbx create --kit sbx/claude-acp:latest claude` composes the mixin onto the built-in agent.
 - `create` leaves a sandbox behind unless you pass `--rm`. A process that is killed with SIGKILL leaves one even with `--rm`. `sbx ls` shows them under names that start with `acp-`, and `sbx rm NAME` removes one.

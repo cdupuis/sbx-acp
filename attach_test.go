@@ -21,8 +21,8 @@ func TestStreamIsByteIdentical(t *testing.T) {
 	r := invoke(t, setup{kits: []string{"echo"}, stdin: payload}, withFake()...)
 	wantCode(t, r, 0)
 	wantStdout(t, r, payload)
-	if len(r.calls) != 2 {
-		t.Fatalf("sbx was called %d times, want 2 (one read, one stream): %q", len(r.calls), r.calls)
+	if len(r.calls) != 3 {
+		t.Fatalf("sbx was called %d times, want read, executable check, stream: %q", len(r.calls), r.calls)
 	}
 	if r.calls[0][1] != "box" || r.calls[0][2] != "sh" {
 		t.Errorf("first sbx call = %q, want exec box sh ...", r.calls[0])
@@ -32,21 +32,26 @@ func TestStreamIsByteIdentical(t *testing.T) {
 			t.Errorf("the read must not forward stdin or allocate a TTY: %q", r.calls[0])
 		}
 	}
-	wantArgv(t, r.calls[1], "exec", "-i", "box", "cat")
+	for _, a := range r.calls[1] {
+		if a == "-i" || a == "-t" {
+			t.Errorf("the executable check must not forward stdin or allocate a TTY: %q", r.calls[1])
+		}
+	}
+	wantArgv(t, r.calls[2], "exec", "-i", "box", "cat")
 }
 
 func TestStreamExitCodePassesThrough(t *testing.T) {
 	r := invoke(t, setup{kits: []string{"exiter"}, stdin: []byte("hello")}, withFake()...)
 	wantCode(t, r, 7)
 	wantStdout(t, r, []byte("hello"))
-	wantArgv(t, r.calls[1], "exec", "-i", "box", "sh", "-c", "cat; exit 7")
+	wantArgv(t, r.calls[2], "exec", "-i", "box", "sh", "-c", "cat; exit 7")
 }
 
 func TestDeclaredEnvReachesTheAgent(t *testing.T) {
 	r := invoke(t, setup{kits: []string{"envagent"}}, withFake()...)
 	wantCode(t, r, 0)
 	wantStdout(t, r, []byte("hello|"))
-	wantArgv(t, r.calls[1], "exec", "-i", "-e", "EMPTY=", "-e", "GREETING=hello", "box",
+	wantArgv(t, r.calls[2], "exec", "-i", "-e", "EMPTY=", "-e", "GREETING=hello", "box",
 		"sh", "-c", `printf "%s|%s" "$GREETING" "$EMPTY"`)
 }
 
@@ -54,7 +59,7 @@ func TestStringCommandRunsThroughSh(t *testing.T) {
 	r := invoke(t, setup{kits: []string{"shstring"}}, withFake()...)
 	wantCode(t, r, 0)
 	wantStdout(t, r, []byte("from-sh:42"))
-	wantArgv(t, r.calls[1], "exec", "-i", "box", "sh", "-c", `printf "from-sh:%s" "$((6*7))"`)
+	wantArgv(t, r.calls[2], "exec", "-i", "box", "sh", "-c", `printf "from-sh:%s" "$((6*7))"`)
 }
 
 func TestAgentFlagSelectsOneOfTwo(t *testing.T) {
@@ -216,7 +221,7 @@ func TestSignalIsForwardedToSbx(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("signal forwarding is exercised on Unix only")
 	}
-	r := startAndSignal(t, setup{kits: []string{"echo"}}, 2, withFake()...)
+	r := startAndSignal(t, setup{kits: []string{"echo"}}, 3, withFake()...)
 	wantCode(t, r, 128+int(syscall.SIGTERM))
 }
 
@@ -240,5 +245,5 @@ func TestRealAdapterAnswersInitialize(t *testing.T) {
 	if resp.ID != 1 || resp.Result.ProtocolVersion == nil {
 		t.Errorf("response %s lacks id 1 or protocolVersion", line)
 	}
-	wantArgv(t, r.calls[1], "exec", "-i", "box", "claude-agent-acp")
+	wantArgv(t, r.calls[2], "exec", "-i", "box", "claude-agent-acp")
 }

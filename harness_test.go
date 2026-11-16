@@ -169,7 +169,7 @@ func fakeExec(args []string) int {
 	if len(argv) == 3 && argv[0] == "sh" && argv[1] == "-c" && strings.Contains(argv[2], kitRoot) {
 		return fakeDiscovery(argv[2], root)
 	}
-	if os.Getenv("FAKE_SBX_FAULT") == "die-by-kill" {
+	if interactive && os.Getenv("FAKE_SBX_FAULT") == "die-by-kill" {
 		self, _ := os.FindProcess(os.Getpid())
 		_ = self.Signal(syscall.SIGKILL)
 		time.Sleep(10 * time.Second)

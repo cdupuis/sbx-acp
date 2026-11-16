@@ -48,14 +48,14 @@ func TestCreateStreamsTheAgentInANewSandbox(t *testing.T) {
 	if !sandboxNamePattern.MatchString(name) {
 		t.Errorf("sandbox name %q does not match %s", name, sandboxNamePattern)
 	}
-	if len(r.calls) != 3 {
-		t.Fatalf("sbx was called %d times, want create, read, stream and no rm: %q", len(r.calls), r.calls)
+	if len(r.calls) != 4 {
+		t.Fatalf("sbx was called %d times, want create, read, executable check, stream and no rm: %q", len(r.calls), r.calls)
 	}
 	wantArgv(t, r.calls[0], "create", "--no-progress", "--name", name, "--kit", echoKit, "echo", wd)
 	if r.calls[1][1] != name || r.calls[1][2] != "sh" {
 		t.Errorf("second sbx call = %q, want the kit read in sandbox %s", r.calls[1], name)
 	}
-	wantArgv(t, r.calls[2], "exec", "-i", name, "cat")
+	wantArgv(t, r.calls[3], "exec", "-i", name, "cat")
 	wantStderr(t, r, `sbx-acp: agent "echo": creating sandbox "`+name+`"`, "Created sandbox "+name)
 }
 
@@ -86,10 +86,10 @@ func TestCreateWithRmRemovesTheSandboxAfterTheSession(t *testing.T) {
 	wantCode(t, r, 0)
 	wantStdout(t, r, []byte("ping"))
 	name := createdName(t, r)
-	if len(r.calls) != 4 {
-		t.Fatalf("sbx was called %d times, want create, read, stream, rm: %q", len(r.calls), r.calls)
+	if len(r.calls) != 5 {
+		t.Fatalf("sbx was called %d times, want create, read, executable check, stream, rm: %q", len(r.calls), r.calls)
 	}
-	wantArgv(t, r.calls[3], "rm", "--force", name)
+	wantArgv(t, r.calls[4], "rm", "--force", name)
 }
 
 func TestCreateFlagsAfterThePositionals(t *testing.T) {
@@ -99,10 +99,10 @@ func TestCreateFlagsAfterThePositionals(t *testing.T) {
 	wantStdout(t, r, []byte("ping"))
 	name := createdName(t, r)
 	wantArgv(t, r.calls[0], "create", "--no-progress", "--name", name, "--kit", echoKit, "echo", wd)
-	if len(r.calls) != 4 {
-		t.Fatalf("sbx was called %d times, want create, read, stream, rm: %q", len(r.calls), r.calls)
+	if len(r.calls) != 5 {
+		t.Fatalf("sbx was called %d times, want create, read, executable check, stream, rm: %q", len(r.calls), r.calls)
 	}
-	wantArgv(t, r.calls[3], "rm", "--force", name)
+	wantArgv(t, r.calls[4], "rm", "--force", name)
 }
 
 func TestCreateKitWithACommaStaysOneReference(t *testing.T) {
@@ -200,12 +200,12 @@ func TestCreateSignalMidStreamStillRemovesWithRm(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("signal forwarding is exercised on Unix only")
 	}
-	r := startAndSignal(t, setup{createKits: []string{"echo"}, dir: t.TempDir()}, 3, createWith("--rm", "--kit", echoKit, "echo")...)
+	r := startAndSignal(t, setup{createKits: []string{"echo"}, dir: t.TempDir()}, 4, createWith("--rm", "--kit", echoKit, "echo")...)
 	wantCode(t, r, 128+int(syscall.SIGTERM))
-	if len(r.calls) != 4 {
-		t.Fatalf("sbx was called %d times, want create, read, stream, rm: %q", len(r.calls), r.calls)
+	if len(r.calls) != 5 {
+		t.Fatalf("sbx was called %d times, want create, read, executable check, stream, rm: %q", len(r.calls), r.calls)
 	}
-	wantArgv(t, r.calls[3], "rm", "--force", createdName(t, r))
+	wantArgv(t, r.calls[4], "rm", "--force", createdName(t, r))
 }
 
 func TestCreateSignalDuringCreateIsForwardedAndRemovesNothing(t *testing.T) {

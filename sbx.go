@@ -33,23 +33,24 @@ func locateSbx(name string) (string, error) {
 
 // readKits leaves stdin disconnected: the client's first request is already
 // waiting there and belongs to the agent.
-func readKits(sbxPath, sandbox string) ([]StagedKit, error) {
+func readKits(in *interrupts, sbxPath, sandbox string) ([]StagedKit, error) {
 	cmd := exec.Command(sbxPath, "exec", sandbox, "sh", "-c", discoverScript)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	code, err := in.run(cmd)
 	detail := ""
 	if s := strings.TrimSpace(stderr.String()); s != "" {
 		detail = ": " + s
 	}
-	var exit *exec.ExitError
 	switch {
-	case errors.As(err, &exit) && exit.ExitCode() == 125:
-		return nil, fmt.Errorf("sbx could not run a command in the sandbox (exit 125)%s", detail)
-	case errors.As(err, &exit) && exit.ExitCode() == 127:
-		return nil, fmt.Errorf("the sandbox image needs sh and cat to read its kit descriptors (exit 127)%s", detail)
 	case err != nil:
 		return nil, fmt.Errorf("sbx exec failed (%v)%s", err, detail)
+	case code == 125:
+		return nil, fmt.Errorf("sbx could not run a command in the sandbox (exit 125)%s", detail)
+	case code == 127:
+		return nil, fmt.Errorf("the sandbox image needs sh and cat to read its kit descriptors (exit 127)%s", detail)
+	case code != 0:
+		return nil, fmt.Errorf("sbx exec failed (exit status %d)%s", code, detail)
 	}
 	return parseStaged(stdout.Bytes())
 }
@@ -84,6 +85,30 @@ func parseStaged(b []byte) ([]StagedKit, error) {
 		kits = append(kits, StagedKit{Stem: stem, Descriptor: rest[:end]})
 		b = rest[end:]
 	}
+}
+
+const checkExecutableScript = `case "$1" in
+  */*) [ -f "$1" ] && [ -x "$1" ] && exit 0; exit 127 ;;
+esac
+search=${2-$PATH}
+while :; do
+  dir=${search%%:*}
+  [ -n "$dir" ] || dir=.
+  [ -f "$dir/$1" ] && [ -x "$dir/$1" ] && exit 0
+  case "$search" in
+    *:*) search=${search#*:} ;;
+    *) exit 127 ;;
+  esac
+done`
+
+func checkLaunch(in *interrupts, sbxPath, sandbox string, l Launch, stderr io.Writer) (int, error) {
+	args := []string{"exec", sandbox, "sh", "-c", checkExecutableScript, "sbx-acp", l.Argv[0]}
+	if path, ok := l.Env["PATH"]; ok {
+		args = append(args, path)
+	}
+	cmd := exec.Command(sbxPath, args...)
+	cmd.Stderr = stderr
+	return in.run(cmd)
 }
 
 // execArgv is the argument list after the sbx path, for both --check and the stream.

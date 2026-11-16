@@ -50,11 +50,12 @@ func runAttach(o attachOptions, sandbox string, stderr io.Writer) int {
 	return code
 }
 
-// attachTo reads the sandbox's staged kits and starts its ACP agent on stdio.
-// started is true once the agent's stream was started or --check printed.
-func attachTo(in *interrupts, sbxPath, sandbox, agent string, check bool, stderr io.Writer) (code int, started bool) {
+func attachTo(in *interrupts, sbxPath, sandbox, agent string, check bool, stderr io.Writer) (code int, streamStarted bool) {
 	r := sandboxReporter(stderr, sandbox)
-	kits, err := readKits(sbxPath, sandbox)
+	kits, err := readKits(in, sbxPath, sandbox)
+	if code := in.received(); code != 0 {
+		return code, false
+	}
 	if err != nil {
 		r.say("%v", err)
 		return exitSbxFailure, false
@@ -67,14 +68,35 @@ func attachTo(in *interrupts, sbxPath, sandbox, agent string, check bool, stderr
 	for _, w := range warnings {
 		r.say("warning: %s", w)
 	}
+	if code := in.received(); code != 0 {
+		return code, false
+	}
 	if err != nil {
 		r.say("%v", err)
 		return exitNoLaunch, false
 	}
 	if check {
 		r.say("agent %s, declared by %s, ACP protocol version %d", launch.Agent, launch.DeclaredBy, launch.ProtocolVersion)
+		if code := in.received(); code != 0 {
+			return code, false
+		}
 		r.say("would run: %s", shellLine(append([]string{sbxPath}, execArgv(sandbox, launch)...)))
-		return 0, true
+		return in.received(), false
+	}
+	code, err = checkLaunch(in, sbxPath, sandbox, launch, stderr)
+	if code := in.received(); code != 0 {
+		return code, false
+	}
+	switch {
+	case err != nil:
+		r.say("cannot check ACP command %q: %v", launch.Argv[0], err)
+		return exitSbxFailure, false
+	case code == 127:
+		r.say("ACP command %q is missing or not executable", launch.Argv[0])
+		return code, false
+	case code != 0:
+		r.say("cannot check ACP command %q (sbx exec exited %d)", launch.Argv[0], code)
+		return exitSbxFailure, false
 	}
 	code, err = stream(in, sbxPath, sandbox, launch, stderr)
 	switch {
