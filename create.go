@@ -162,6 +162,9 @@ func runCreate(o createOptions, agent string, paths []string, stderr io.Writer, 
 		for _, w := range warnings {
 			say("warning: %s", w)
 		}
+		if code := in.received(); code != 0 {
+			return code
+		}
 		if err != nil {
 			say("%v", err)
 			return exitNoLaunch
@@ -172,10 +175,16 @@ func runCreate(o createOptions, agent string, paths []string, stderr io.Writer, 
 			source, plan.Kits = fmt.Sprintf("ACP mixin %s, found on Docker Hub", ref), []string{ref}
 		}
 	}
+	if code := in.received(); code != 0 {
+		return code
+	}
 	if o.check {
 		say("%s", source)
+		if code := in.received(); code != 0 {
+			return code
+		}
 		say("would run: %s", shellLine(append([]string{sbxPath}, plan.argv()...)))
-		return 0
+		return in.received()
 	}
 
 	sandboxSay := sandboxReporter(stderr, plan.Name).say
@@ -196,13 +205,13 @@ func runCreate(o createOptions, agent string, paths []string, stderr io.Writer, 
 		return exitSbxFailure
 	}
 
-	code, started := attachTo(in, sbxPath, plan.Name, plan.Agent, false, stderr)
-	if started && !o.rm {
+	code, streamStarted := attachTo(in, sbxPath, plan.Name, plan.Agent, false, stderr)
+	if streamStarted && !o.rm {
 		return code
 	}
 	if err := removeSandbox(sbxPath, plan.Name, stderr); err != nil {
 		sandboxSay("warning: could not remove it; run: sbx rm %s", plan.Name)
-	} else if !started {
+	} else if !streamStarted {
 		sandboxSay("removed, because it never started an ACP agent%s", hint)
 	}
 	return code
