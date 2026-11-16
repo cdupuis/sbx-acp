@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -171,8 +174,14 @@ func fakeExec(args []string) int {
 		_ = self.Signal(syscall.SIGKILL)
 		time.Sleep(10 * time.Second)
 	}
+	for _, env := range overlay {
+		key, value, _ := strings.Cut(env, "=")
+		if err := os.Setenv(key, value); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 125
+		}
+	}
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = append(os.Environ(), overlay...)
 	if interactive {
 		cmd.Stdin = os.Stdin
 	}
@@ -181,6 +190,29 @@ func fakeExec(args []string) int {
 }
 
 func fakeDiscovery(script, root string) int {
+	if os.Getenv("FAKE_SBX_FAULT") == "discovery-waits" {
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGTERM)
+		defer signal.Stop(signals)
+		conn, err := net.Dial("tcp", os.Getenv("FAKE_SBX_DISCOVERY_ADDR"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		_, _ = conn.Write([]byte("R"))
+		released := make(chan struct{})
+		go func() {
+			_, _ = io.Copy(io.Discard, conn)
+			close(released)
+		}()
+		select {
+		case <-signals:
+			_, _ = conn.Write([]byte("T"))
+		case <-released:
+		}
+		_ = conn.Close()
+		<-released
+	}
 	if os.Getenv("FAKE_SBX_FAULT") == "no-sh" {
 		fmt.Fprintln(os.Stderr, "exec: sh: not found")
 		return 127
